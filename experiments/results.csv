@@ -1,1 +1,46 @@
 run_name,config,features,seed,fold,split,n_train,n_eval,prevalence,roc_auc,pr_auc,log_loss,brier,epochs_ran,seconds,commit,notes
+gbdt_sufijo,baseline,num(11) + cat(7) + sufijo,42,0,cv_dev,6327,1582,0.121997,0.977738,0.820572,0.122175,0.038172,50.0,0.53,b0cd827-dirty,"Baseline fuerte de referencia. Esperado ROC ~ 0.970, PR-AUC ~ 0.775."
+gbdt_sufijo,baseline,num(11) + cat(7) + sufijo,42,1,cv_dev,6328,1581,0.1284,0.973693,0.830647,0.137517,0.039366,49.0,0.54,b0cd827-dirty,"Baseline fuerte de referencia. Esperado ROC ~ 0.970, PR-AUC ~ 0.775."
+gbdt_sufijo,baseline,num(11) + cat(7) + sufijo,42,2,cv_dev,6327,1582,0.127686,0.970824,0.764012,0.148072,0.045821,43.0,0.46,b0cd827-dirty,"Baseline fuerte de referencia. Esperado ROC ~ 0.970, PR-AUC ~ 0.775."
+gbdt_sufijo,baseline,num(11) + cat(7) + sufijo,42,3,cv_dev,6327,1582,0.140329,0.973553,0.798635,0.145016,0.043241,50.0,0.55,b0cd827-dirty,"Baseline fuerte de referencia. Esperado ROC ~ 0.970, PR-AUC ~ 0.775."
+gbdt_sufijo,baseline,num(11) + cat(7) + sufijo,42,4,cv_dev,6327,1582,0.127686,0.975262,0.825622,0.138111,0.042083,67.0,0.76,b0cd827-dirty,"Baseline fuerte de referencia. Esperado ROC ~ 0.970, PR-AUC ~ 0.775."
+gbdt_tabular,baseline,num(11) + cat(7),42,0,cv_dev,6327,1582,0.121997,0.591573,0.171131,0.370034,0.107307,31.0,1.47,b0cd827-dirty,Sin texto. Techo esperado ROC ~ 0.58.
+gbdt_tabular,baseline,num(11) + cat(7),42,1,cv_dev,6328,1581,0.1284,0.60569,0.164424,0.376674,0.110987,15.0,0.13,b0cd827-dirty,Sin texto. Techo esperado ROC ~ 0.58.
+gbdt_tabular,baseline,num(11) + cat(7),42,2,cv_dev,6327,1582,0.127686,0.595736,0.161746,0.378474,0.110996,16.0,0.14,b0cd827-dirty,Sin texto. Techo esperado ROC ~ 0.58.
+gbdt_tabular,baseline,num(11) + cat(7),42,3,cv_dev,6327,1582,0.140329,0.609645,0.189127,0.399406,0.119354,18.0,0.14,b0cd827-dirty,Sin texto. Techo esperado ROC ~ 0.58.
+gbdt_tabular,baseline,num(11) + cat(7),42,4,cv_dev,6327,1582,0.127686,0.584991,0.179082,0.380835,0.110915,24.0,0.15,b0cd827-dirty,Sin texto. Techo esperado ROC ~ 0.58.
+logreg_tabular,baseline,num(11) + onehot(87),42,0,cv_dev,6327,1582,0.121997,0.587413,0.151057,0.366473,0.106456,,0.1,b0cd827-dirty,Sin texto: no puede ver el marcador de reputacion.
+logreg_tabular,baseline,num(11) + onehot(87),42,1,cv_dev,6328,1581,0.1284,0.584763,0.155314,0.379469,0.111312,,0.1,b0cd827-dirty,Sin texto: no puede ver el marcador de reputacion.
+logreg_tabular,baseline,num(11) + onehot(87),42,2,cv_dev,6327,1582,0.127686,0.558846,0.150389,0.381358,0.111361,,0.15,b0cd827-dirty,Sin texto: no puede ver el marcador de reputacion.
+logreg_tabular,baseline,num(11) + onehot(87),42,3,cv_dev,6327,1582,0.140329,0.545098,0.161219,0.408906,0.12125,,0.09,b0cd827-dirty,Sin texto: no puede ver el marcador de reputacion.
+logreg_tabular,baseline,num(11) + onehot(87),42,4,cv_dev,6327,1582,0.127686,0.544131,0.138578,0.386555,0.11271,,0.11,b0cd827-dirty,Sin texto: no puede ver el marcador de reputacion.
+mlp_texto_tabular,baseline,num(11) + onehot(87) + svd100(tfidf),42,0,cv_dev,6327,1582,0.121997,0.971684,0.761364,0.141842,0.045037,36.0,33.61,b0cd827-dirty,Red neuronal sin atencion: aisla el efecto de la arquitectura.
+mlp_texto_tabular,baseline,num(11) + onehot(87) + svd100(tfidf),42,1,cv_dev,6328,1581,0.1284,0.964334,0.787775,0.149935,0.044126,29.0,31.43,b0cd827-dirty,Red neuronal sin atencion: aisla el efecto de la arquitectura.
+mlp_texto_tabular,baseline,num(11) + onehot(87) + svd100(tfidf),42,2,cv_dev,6327,1582,0.127686,0.954502,0.675877,0.173626,0.053806,25.0,30.52,b0cd827-dirty,Red neuronal sin atencion: aisla el efecto de la arquitectura.
+mlp_texto_tabular,baseline,num(11) + onehot(87) + svd100(tfidf),42,3,cv_dev,6327,1582,0.140329,0.961006,0.766075,0.176383,0.055749,35.0,33.04,b0cd827-dirty,Red neuronal sin atencion: aisla el efecto de la arquitectura.
+mlp_texto_tabular,baseline,num(11) + onehot(87) + svd100(tfidf),42,4,cv_dev,6327,1582,0.127686,0.970509,0.795966,0.146564,0.045575,29.0,33.12,b0cd827-dirty,Red neuronal sin atencion: aisla el efecto de la arquitectura.
+prior,baseline,ninguna,42,0,cv_dev,6327,1582,0.121997,0.5,0.121997,0.371251,0.107196,,0.0,b0cd827-dirty,Predice la prevalencia de train. Piso del PR-AUC.
+prior,baseline,ninguna,42,1,cv_dev,6328,1581,0.1284,0.5,0.1284,0.383338,0.111914,,0.0,b0cd827-dirty,Predice la prevalencia de train. Piso del PR-AUC.
+prior,baseline,ninguna,42,2,cv_dev,6327,1582,0.127686,0.5,0.127686,0.381981,0.111386,,0.0,b0cd827-dirty,Predice la prevalencia de train. Piso del PR-AUC.
+prior,baseline,ninguna,42,3,cv_dev,6327,1582,0.140329,0.5,0.140329,0.406407,0.120829,,0.0,b0cd827-dirty,Predice la prevalencia de train. Piso del PR-AUC.
+prior,baseline,ninguna,42,4,cv_dev,6327,1582,0.127686,0.5,0.127686,0.381981,0.111386,,0.0,b0cd827-dirty,Predice la prevalencia de train. Piso del PR-AUC.
+tfidf_description,baseline,"tfidf(1,2) de description",42,0,cv_dev,6327,1582,0.121997,0.962798,0.675951,0.148626,0.046872,,0.4,b0cd827-dirty,Solo la descripcion: su ultima oracion codifica el mismo nivel.
+tfidf_description,baseline,"tfidf(1,2) de description",42,1,cv_dev,6328,1581,0.1284,0.962078,0.757513,0.155314,0.046339,,0.56,b0cd827-dirty,Solo la descripcion: su ultima oracion codifica el mismo nivel.
+tfidf_description,baseline,"tfidf(1,2) de description",42,2,cv_dev,6327,1582,0.127686,0.953051,0.645082,0.165357,0.051844,,0.41,b0cd827-dirty,Solo la descripcion: su ultima oracion codifica el mismo nivel.
+tfidf_description,baseline,"tfidf(1,2) de description",42,3,cv_dev,6327,1582,0.140329,0.952767,0.677849,0.175303,0.056066,,0.4,b0cd827-dirty,Solo la descripcion: su ultima oracion codifica el mismo nivel.
+tfidf_description,baseline,"tfidf(1,2) de description",42,4,cv_dev,6327,1582,0.127686,0.964625,0.699159,0.148036,0.045362,,0.37,b0cd827-dirty,Solo la descripcion: su ultima oracion codifica el mismo nivel.
+tfidf_sin_marcador,baseline,"tfidf(1,2) de texto sin marcador",42,0,cv_dev,6327,1582,0.121997,0.486564,0.117372,0.383964,0.110348,,0.47,b0cd827-dirty,Sin sufijo y sin oracion de reputacion: el problema se vuelve irresoluble. Anticipa la ablacion central de la Fase 9.
+tfidf_sin_marcador,baseline,"tfidf(1,2) de texto sin marcador",42,1,cv_dev,6328,1581,0.1284,0.544691,0.139154,0.38688,0.113062,,0.47,b0cd827-dirty,Sin sufijo y sin oracion de reputacion: el problema se vuelve irresoluble. Anticipa la ablacion central de la Fase 9.
+tfidf_sin_marcador,baseline,"tfidf(1,2) de texto sin marcador",42,2,cv_dev,6327,1582,0.127686,0.531705,0.142267,0.387925,0.112933,,0.48,b0cd827-dirty,Sin sufijo y sin oracion de reputacion: el problema se vuelve irresoluble. Anticipa la ablacion central de la Fase 9.
+tfidf_sin_marcador,baseline,"tfidf(1,2) de texto sin marcador",42,3,cv_dev,6327,1582,0.140329,0.5305,0.152104,0.413061,0.122173,,0.48,b0cd827-dirty,Sin sufijo y sin oracion de reputacion: el problema se vuelve irresoluble. Anticipa la ablacion central de la Fase 9.
+tfidf_sin_marcador,baseline,"tfidf(1,2) de texto sin marcador",42,4,cv_dev,6327,1582,0.127686,0.528584,0.136648,0.387755,0.112895,,0.45,b0cd827-dirty,Sin sufijo y sin oracion de reputacion: el problema se vuelve irresoluble. Anticipa la ablacion central de la Fase 9.
+tfidf_texto,baseline,"tfidf(1,2) de title + description",42,0,cv_dev,6327,1582,0.121997,0.960698,0.656919,0.157688,0.049003,,0.51,b0cd827-dirty,"Los dos campos. Esperado: sin diferencia, son redundantes."
+tfidf_texto,baseline,"tfidf(1,2) de title + description",42,1,cv_dev,6328,1581,0.1284,0.959923,0.752471,0.161445,0.047572,,0.53,b0cd827-dirty,"Los dos campos. Esperado: sin diferencia, son redundantes."
+tfidf_texto,baseline,"tfidf(1,2) de title + description",42,2,cv_dev,6327,1582,0.127686,0.949914,0.621841,0.174077,0.054113,,0.52,b0cd827-dirty,"Los dos campos. Esperado: sin diferencia, son redundantes."
+tfidf_texto,baseline,"tfidf(1,2) de title + description",42,3,cv_dev,6327,1582,0.140329,0.954031,0.685796,0.180743,0.057238,,0.53,b0cd827-dirty,"Los dos campos. Esperado: sin diferencia, son redundantes."
+tfidf_texto,baseline,"tfidf(1,2) de title + description",42,4,cv_dev,6327,1582,0.127686,0.965024,0.708326,0.15584,0.047095,,0.58,b0cd827-dirty,"Los dos campos. Esperado: sin diferencia, son redundantes."
+tfidf_title,baseline,"tfidf(1,2) de title",42,0,cv_dev,6327,1582,0.121997,0.961284,0.666014,0.161618,0.049538,,0.17,b0cd827-dirty,"Solo el titulo, con su marcador. Esperado ROC ~ 0.956."
+tfidf_title,baseline,"tfidf(1,2) de title",42,1,cv_dev,6328,1581,0.1284,0.956042,0.721313,0.167766,0.049747,,0.15,b0cd827-dirty,"Solo el titulo, con su marcador. Esperado ROC ~ 0.956."
+tfidf_title,baseline,"tfidf(1,2) de title",42,2,cv_dev,6327,1582,0.127686,0.950936,0.628216,0.175869,0.054189,,0.14,b0cd827-dirty,"Solo el titulo, con su marcador. Esperado ROC ~ 0.956."
+tfidf_title,baseline,"tfidf(1,2) de title",42,3,cv_dev,6327,1582,0.140329,0.952971,0.667727,0.184972,0.058296,,0.15,b0cd827-dirty,"Solo el titulo, con su marcador. Esperado ROC ~ 0.956."
+tfidf_title,baseline,"tfidf(1,2) de title",42,4,cv_dev,6327,1582,0.127686,0.962767,0.696513,0.162299,0.049297,,0.14,b0cd827-dirty,"Solo el titulo, con su marcador. Esperado ROC ~ 0.956."

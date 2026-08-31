@@ -19,7 +19,8 @@ decisiones de diseño justificadas, está en [plan.md](plan.md).
 | 2 | EDA formal (Ejercicio 1) | hecho |
 | 3 | Target y partición | hecho |
 | 4 | Features y preprocesamiento | hecho |
-| 5–12 | Baselines, tokenizer, Transformer, ablaciones | pendiente |
+| 5 | Baselines | hecho |
+| 6–12 | Tokenizer, Transformer, ablaciones, presentación | pendiente |
 
 ---
 
@@ -324,6 +325,65 @@ lugar**, el `collate_fn` que arma `make_dataloader`, que además recibe `generat
 `worker_init_fn` para que el orden de los batches sea reproducible. La rama de texto es
 opcional (`input_ids=None`): las ablaciones "solo texto" y "solo tabular" se expresan
 construyendo el dataset sin una de las dos partes, no con banderas dentro del modelo.
+
+---
+
+## Baselines
+
+```bash
+python -m src.baselines                      # corre los 9 y escribe results.csv
+python -m src.baselines --solo prior tfidf_title
+```
+
+Todos se evalúan con la **CV agrupada de 5 folds sobre `dev`** congelada en la Fase 3. El
+test no se toca. Cada fold ajusta su propio `FeaturePipeline` y su propio
+`TfidfVectorizer` **solo con las filas de train del fold**: ajustar el vectorizador sobre
+todo el dataset filtraría el vocabulario y las frecuencias de documento del test hacia
+train.
+
+| Baseline | Features | ROC-AUC | PR-AUC | Brier |
+|---|---|---|---|---|
+| `prior` | ninguna | 0.5000 | 0.1292 ± 0.0067 | 0.1125 |
+| `logreg_tabular` | num(11) + onehot(87) | 0.5641 ± 0.0210 | 0.1513 ± 0.0083 | 0.1126 |
+| `gbdt_tabular` | num(11) + cat(7) | 0.5975 ± 0.0101 | 0.1731 ± 0.0112 | 0.1119 |
+| `tfidf_title` | TF-IDF (1,2) de `title` | 0.9568 ± 0.0051 | 0.6760 ± 0.0351 | 0.0522 |
+| `tfidf_description` | TF-IDF (1,2) de `description` | 0.9591 ± 0.0057 | 0.6911 ± 0.0418 | 0.0493 |
+| `tfidf_texto` | TF-IDF (1,2) de ambos | 0.9579 ± 0.0059 | 0.6851 ± 0.0497 | 0.0510 |
+| `tfidf_sin_marcador` | ídem, sin sufijo ni oración de reputación | **0.5244 ± 0.0221** | **0.1375 ± 0.0127** | 0.1143 |
+| **`gbdt_sufijo`** | num(11) + cat(7) + sufijo | **0.9742 ± 0.0025** | **0.8079 ± 0.0274** | 0.0417 |
+| `mlp_texto_tabular` | num + onehot + SVD-100 de TF-IDF | 0.9644 ± 0.0071 | 0.7574 ± 0.0478 | 0.0489 |
+
+Media ± desvío sobre los 5 folds. Prevalencia de `dev` = **0.1292**, que es el piso del
+PR-AUC: `gbdt_sufijo` rinde 6.25× el azar.
+
+Los tres números del plan se reproducen: solo-tabular 0.5975 contra ≈0.58 esperado,
+TF-IDF de título 0.9568 contra 0.9562, `gbdt_sufijo` 0.9742 contra 0.9695. El notebook
+[`02_baselines.ipynb`](notebooks/02_baselines.ipynb) tiene esa verificación como `assert`.
+
+### Qué fijan estos números
+
+- **El objetivo realista del Transformer es PR-AUC ≈ 0.81 / ROC ≈ 0.974.** Superarlo por
+  mucho sería señal de fuga; quedarse muy por debajo, de un bug.
+- **Es previsible que el GBDT gane.** La señal es un token categórico de 20 valores: no
+  requiere composicionalidad, que es lo que un encoder aporta. Se presenta con el análisis
+  de por qué, y vale más que un número inflado.
+- **El margen está en la fusión, no en el texto solo.** `tfidf_texto` 0.685 contra
+  `gbdt_sufijo` 0.808 son 12 puntos de PR-AUC que aportan `allergens` y `category`
+  modulando la compra dentro del nivel ALTO.
+- **`mlp_texto_tabular` es el control de arquitectura**: ya combina texto y tabular sin
+  atención. Si el Transformer no le gana, lo que aporte no será el mecanismo de atención.
+- **`tfidf_sin_marcador` (ROC 0.524) es la ablación central adelantada.** Sin el marcador,
+  el problema es irresoluble: el modelo no aprende qué productos se compran, aprende a leer
+  un marcador de reputación insertado sintéticamente.
+
+Cada corrida queda registrada en [`experiments/results.csv`](experiments/results.csv), una
+fila por baseline y fold, con ROC-AUC, PR-AUC, log loss, Brier, segundos y el hash del
+commit. Las medias y los desvíos se calculan al leer, nunca se guardan agregados.
+
+| Figura | Qué muestra |
+|---|---|
+| `fig_09_baselines.png` | ROC-AUC y PR-AUC por baseline, con el piso de cada métrica |
+| `fig_10_curvas_baselines.png` | Curvas ROC y PR *out-of-fold* sobre `dev` |
 
 ---
 
