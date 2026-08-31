@@ -1,0 +1,51 @@
+# TP1 Transformers - dependencias con version exacta.
+#
+# Entorno de referencia (el que produjo los resultados reportados):
+#   Python          3.13.14
+#   SO              Windows 11
+#   GPU             NVIDIA GeForce RTX 4070
+#   Driver NVIDIA   610.74
+#   CUDA (torch)    12.8
+#   cuDNN           91300
+#
+# La version de CUDA importa para la reproducibilidad: la misma semilla sobre
+# otra version de CUDA/cuDNN puede dar resultados distintos bit a bit, aunque
+# equivalentes en distribucion.
+#
+# Instalacion:
+#   python -m venv .venv
+#   .venv\Scripts\activate                       # Windows
+#   pip install torch==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+#   pip install -r requirements.txt
+#
+# Sin GPU, reemplazar la linea de torch por:
+#   pip install torch==2.11.0
+
+# --- Nucleo ------------------------------------------------------------------
+# torch se instala aparte, desde el indice de PyTorch (ver arriba).
+# torch==2.11.0+cu128
+numpy==2.5.2
+pandas==3.0.5
+scikit-learn==1.9.0
+scipy==1.18.1
+
+# --- Tokenizacion ------------------------------------------------------------
+# Se usa para ENTRENAR un BPE sobre el corpus del TP. No se descarga ningun
+# tokenizador ni peso pre-entrenado (decision A3).
+tokenizers==0.23.1
+
+# --- Configuracion -----------------------------------------------------------
+PyYAML==6.0.3
+
+# --- Visualizacion -----------------------------------------------------------
+matplotlib==3.11.1
+seaborn==0.13.2
+
+# --- Notebooks ---------------------------------------------------------------
+jupyterlab==4.6.3
+ipykernel==7.3.0
+nbformat==5.11.1
+nbconvert==7.17.1
+
+# --- Tests -------------------------------------------------------------------
+pytest==9.1.1

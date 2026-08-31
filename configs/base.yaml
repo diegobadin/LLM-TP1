@@ -1,0 +1,68 @@
+# Configuracion base del TP1.
+#
+# Cada ablacion de la Fase 9 es un archivo en configs/ablations/ que hereda de
+# este y cambia UNA sola clave. Ningun script edita hiperparametros a mano.
+
+run:
+  name: base
+  seed: 42
+  seeds: [42, 43, 44, 45, 46]   # Fase 9: 5 semillas x 5 folds por configuracion
+
+data:
+  csv: data/raw/supermarket_products.csv
+  splits_dir: data/splits
+  target: bought
+  group: query_id
+  test_size: 0.20
+  valid_size: 0.20      # dentro de dev, para desarrollo rapido y early stopping
+  n_folds: 5            # GroupKFold sobre dev, para seleccion de modelo
+
+features:
+  use_text: true
+  use_tabular: true
+  text_fields: [title, description]
+  keep_suffix: true     # ablacion central de la Fase 9
+  numericas: [price, net_weight_oz, nutrition_score, filter_price_min, filter_price_max]
+  categoricas: [category, brand, storage_type, country_of_origin, unit_of_measure, package_size, allergens]
+
+tokenizer:
+  kind: bpe
+  vocab_size: 4000
+  max_len: null         # se mide en la Fase 6 (percentil 99), no se elige a ojo
+  special_tokens: ["[PAD]", "[UNK]", "[CLS]", "[SEP]"]
+
+model:
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  d_ff: 128
+  dropout: 0.1
+  activation: gelu
+  norm: pre_ln
+  pos_encoding: sinusoidal   # sinusoidal | learned | none
+  pooling: cls               # cls | mean
+  attn_impl: scratch         # scratch | torch_sdpa | torch_mha
+  use_cross_item: false
+  d_tab: 32
+  cat_emb_dim: 12
+
+train:
+  epochs: 50
+  batch_size: 64
+  lr: 3.0e-4
+  weight_decay: 1.0e-2
+  warmup_ratio: 0.10
+  scheduler: cosine
+  grad_clip: 1.0
+  loss: bce                  # bce | bce_pos_weight | focal
+  pos_weight: null
+  early_stopping:
+    metric: pr_auc
+    patience: 10
+  amp: false                 # fp32: a esta escala AMP no acelera y agrega no-determinismo
+  num_workers: 0
+
+eval:
+  primary_metric: pr_auc     # average_precision_score
+  secondary_metrics: [roc_auc, log_loss, brier]
+  results_csv: experiments/results.csv

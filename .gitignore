@@ -1,0 +1,39 @@
+# --- Datos -------------------------------------------------------------------
+# El dataset no se versiona. Tampoco los splits: son reproducibles desde la
+# semilla con `python -m src.data.splits` (ver Fase 3 del plan).
+data/*
+!data/raw/
+!data/splits/
+data/raw/*
+!data/raw/.gitkeep
+data/splits/*
+!data/splits/.gitkeep
+
+# --- Entorno -----------------------------------------------------------------
+.venv/
+venv/
+env/
+.python-version
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+.mypy_cache/
+.ruff_cache/
+
+# --- Artefactos de entrenamiento ---------------------------------------------
+checkpoints/
+artifacts/
+runs/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# --- Sistema -----------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
