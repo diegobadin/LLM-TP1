@@ -1,14 +1,14 @@
 """Estudio de ablacion (Fase 9).
 
-Ocho configuraciones, cada una con **5 semillas sobre los 5 folds agrupados de
-dev**: 25 entrenamientos por fila, 200 en total. Con ~200 positivos por fold de
+Diecisiete configuraciones, cada una con **5 semillas sobre los 5 folds agrupados
+de dev**: 25 entrenamientos por fila, 425 en total. Con ~200 positivos por fold de
 validacion, diferencias de PR-AUC de pocos puntos son indistinguibles del ruido,
 y sin desvio la tabla no permite concluir nada.
 
-**Sobre cambiar mas de una cosa por fila.** Las cuatro filas de las que salen las
-conclusiones del trabajo (el marcador, las dos ramas y la fuga) cambian **una
-sola** clave, porque de ellas se afirma algo atribuible. Las dos filas de
-arquitectura mueven tres claves a la vez a proposito: no se quiere saber si
+**Sobre cambiar mas de una cosa por fila.** Con la base en una sola capa y el
+ratio d_ff/d_model fijo en 4, casi todas las filas cambian **una sola** clave:
+el ratio, las cabezas y la profundidad se mueven solas. Las tres filas de ancho
+mueven tres claves a proposito: no se quiere saber si
 importa la profundidad *o* el ancho *o* la cantidad de cabezas, sino si mover la
 capacidad en bloque cambia algo, y para eso una receta vale por tres filas. Cada
 configuracion **declara** que claves toca (``CAMBIOS_DECLARADOS``) y un test
@@ -67,8 +67,8 @@ def _ablacion(name: str, nota: str, **cambios) -> tuple[RunConfig, str]:
 
 #: La grilla. El segundo elemento de cada par es que demuestra la fila.
 #:
-#: Ocho configuraciones: cuatro que sostienen las conclusiones (una clave cada
-#: una), dos recetas de capacidad (tres claves), el tokenizador y la fuga.
+#: Diecisiete configuraciones: cuatro que sostienen las conclusiones, cuatro
+#: familias de arquitectura con el ratio del paper y el tokenizador.
 GRILLA: tuple[tuple[RunConfig, str], ...] = (
     _ablacion("base",
               "Configuracion de referencia: texto + tabular, marcador de reputacion, "
@@ -97,17 +97,74 @@ GRILLA: tuple[tuple[RunConfig, str], ...] = (
               "numeros que la trampa ni siquiera paga.",
               include_cart=True),
 
-    # -- capacidad, en bloque -------------------------------------------------- #
-    _ablacion("arq_minima",
-              "Receta minima: 1 capa, d_model 32 y 1 cabeza. La pregunta no es cual "
-              "de los tres importa sino si hace falta algo de todo esto para leer un "
-              "marcador de 4 tokens.",
-              n_layers=1, d_model=32, n_heads=1),
-    _ablacion("arq_grande",
-              "Receta grande: 4 capas, d_model 96 (el maximo que permite el "
-              "enunciado) y 8 cabezas. Mide si escalar la capacidad ayuda o "
-              "sobreajusta con 6.300 ejemplos de entrenamiento.",
-              n_layers=4, d_model=96, n_heads=8),
+    # -- el ratio d_ff/d_model, que es la premisa del paper --------------------- #
+    # Unica familia que se sale del ratio 4, porque es la que lo estudia. Cambia
+    # una sola clave: con la base en 1 capa, mover d_ff no arrastra nada mas.
+    _ablacion("ratio_1",
+              "d_ff = d_model (64). El feed-forward deja de expandir: cada bloque "
+              "proyecta a la misma dimension y vuelve. Es el limite inferior del "
+              "ratio, y mide cuanta de la capacidad del bloque vive en el FFN.",
+              d_ff=64),
+    _ablacion("ratio_2",
+              "d_ff = 2 x d_model (128). Es el ratio que tenia la grilla anterior en "
+              "todas sus filas, asi que esta es la que hace comparables los "
+              "resultados viejos con los nuevos.",
+              d_ff=128),
+    _ablacion("ratio_8",
+              "d_ff = 8 x d_model (512), el doble del que propone el paper. Si el 4 "
+              "es un optimo y no un piso, esta fila no deberia mejorar nada y ademas "
+              "deberia empezar a sobreajustar con 6.300 ejemplos.",
+              d_ff=512),
+
+    # -- cabezas, a parametros exactamente constantes --------------------------- #
+    # Las cuatro (con la base en 4) tienen el mismo total de parametros: repartir
+    # d_model en mas cabezas no crea ni destruye pesos, solo cambia en cuantos
+    # subespacios se atiende. Es el diseno de la Table 3(A) del paper.
+    _ablacion("cabezas_1",
+              "Una sola cabeza, d_head 64: exactamente la dimension por cabeza que "
+              "usa el paper. Sin multi-cabeza el modelo atiende en un unico "
+              "subespacio, que es la pregunta que la fila responde.",
+              n_heads=1),
+    _ablacion("cabezas_2",
+              "Dos cabezas, d_head 32. Punto intermedio de la familia, a parametros "
+              "constantes contra la base.",
+              n_heads=2),
+    _ablacion("cabezas_8",
+              "Ocho cabezas, d_head 8. El paper reporta que pasarse de cabezas "
+              "degrada porque cada subespacio queda demasiado chico; esta fila lo "
+              "pone a prueba a esta escala.",
+              n_heads=8),
+
+    # -- ancho, manteniendo d_head 16 y el ratio 4 ------------------------------ #
+    # Escala como escala el paper: d_head fijo y n_heads moviendose con d_model.
+    # Mueve tres claves porque mantener las dos invariantes lo obliga.
+    _ablacion("ancho_32",
+              "d_model 32 con 2 cabezas y d_ff 128. Mantiene d_head en 16 y el ratio "
+              "en 4, asi que es un escalado de ancho limpio y no una receta que "
+              "mezcla tres cosas.",
+              d_model=32, n_heads=2, d_ff=128),
+    _ablacion("d48_6cabezas",
+              "d_model 48 con 6 cabezas y d_ff 192. Es el unico punto de la grilla "
+              "con d_head 8 y ancho intermedio: combina el ancho del medio con los "
+              "subespacios mas chicos, que es la esquina que las otras familias no "
+              "tocan.",
+              d_model=48, n_heads=6, d_ff=192),
+    _ablacion("ancho_96",
+              "d_model 96 (el maximo que permite el enunciado) con 6 cabezas y d_ff "
+              "384. Mantiene d_head 16 y ratio 4: es la version coherente del "
+              "'escalar la capacidad' que la grilla anterior hacia con el FFN fijo.",
+              d_model=96, n_heads=6, d_ff=384),
+
+    # -- profundidad, ya con el ratio corregido --------------------------------- #
+    _ablacion("capas_2",
+              "Dos bloques encoder en lugar de uno. Con el ratio del FFN ya "
+              "corregido, mide si apilar bloques aporta algo sobre una senal que es "
+              "un marcador de 4 tokens.",
+              n_layers=2),
+    _ablacion("capas_4",
+              "Cuatro bloques encoder. El paper usa 6; con 6.300 ejemplos de "
+              "entrenamiento 4 ya es mucho, y la fila mide si sobreajusta.",
+              n_layers=4),
 
     # -- tokenizador -------------------------------------------------------------- #
     _ablacion("vocab_256",

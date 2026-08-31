@@ -6,7 +6,9 @@ Predicción del *Buy Through Rate* (BTR) sobre impresiones de productos de un
 supermercado online, con un encoder Transformer implementado desde cero.
 
 El plan de trabajo completo, con las fases, los criterios de aceptación y las
-decisiones de diseño justificadas, está en [plan.md](plan.md).
+decisiones de diseño justificadas, está en [plan.md](plan.md). Cómo funciona cada pieza —la
+arquitectura en detalle, las features, la tokenización, los experimentos y las particiones—
+está en [GUIA.md](GUIA.md).
 
 ---
 
@@ -23,9 +25,11 @@ decisiones de diseño justificadas, está en [plan.md](plan.md).
 | 6 | Tokenizador BPE | hecho |
 | 7 | Transformer desde cero (bloques + tests) | hecho |
 | 8 | Modelo completo y entrenamiento | hecho |
-| 9 | Estudio de ablación (8 configuraciones) | código listo y testeado, **sin correr** |
-| 10 | Evaluación final e interpretabilidad | código listo y testeado, **sin correr** |
+| 9 | Estudio de ablación (17 configuraciones) | hecho — 425 corridas |
+| 10 | Evaluación final e interpretabilidad | hecho — test evaluado |
 | 11–12 | Personalización y presentación | pendiente |
+
+Cómo funciona cada pieza y cómo lanzar lo que falta: **[GUIA.md](GUIA.md)** (§11, runbook).
 
 ---
 
@@ -420,14 +424,6 @@ quedan legibles (`Seller`, no `ĠSeller`), lo que importa para los mapas de aten
 Fase 10, y la tasa de `[UNK]` pasa a ser una métrica con sentido en vez de cero por
 construcción.
 
-**¿Por qué no uno pre-entrenado del Hub?** Se midió: `bert-base-uncased` y `gpt2` funcionan
-sobre este corpus (0% de `[UNK]`, marcador entero), pero traen 30.522 y 50.257 tokens de
-vocabulario de los que **solo el 1.6% aparece en train**. El modelo pasaría de 167k
-parámetros a ~2M, casi todos embeddings que nunca reciben gradiente. Podar el vocabulario lo
-arregla, pero equivale a construir uno propio — que además da secuencias 10% más cortas
-(44.9 contra 49.3 tokens) sobre una atención que es cuadrática. El detalle está en la Fase 6
-del [plan](plan.md).
-
 ### El vocabulario satura en 1.355 tokens
 
 El corpus de train tiene solo **622 tipos de palabra**: el texto es plantillado. El BPE
@@ -565,12 +561,19 @@ tokenizador BPE— se ajusta **por fold y solo con train**.
 |---|---|---|---|
 | `d_model` | 64 | Optimizador | AdamW, `lr` 1e-3, `wd` 1e-2 |
 | `n_heads` | 4 (`d_head` 16) | Scheduler | warmup lineal 10% + coseno |
-| `n_layers` | 2 | Batch | 256 |
-| `d_ff` | 128 | Loss | `BCEWithLogitsLoss` |
+| `n_layers` | **1** | Batch | 256 |
+| `d_ff` | **256** (`d_ff/d_model` = 4) | Loss | `BCEWithLogitsLoss` |
 | `dropout` | 0.1 | Grad clipping | 1.0 |
 | Normalización | pre-LN | Early stopping | PR-AUC de valid, `patience` 10 |
 
-Dos desvíos respecto del plan, los dos medidos:
+Tres desvíos respecto del plan, los tres medidos:
+
+- **1 capa y `d_ff` 256 en lugar de 2 capas y `d_ff` 128.** El plan proponía 2 capas
+  como *valor inicial*; la ablación de profundidad mostró que 1, 2 y 4 capas caen dentro
+  del mismo desvío, y con una señal de 4 tokens no hay composicionalidad que justifique
+  apilar bloques. `d_ff` pasa a 256 para respetar `d_ff / d_model = 4`, el ratio de
+  *Attention is all you need*. El modelo resultante es **más chico** que el anterior:
+  agregar el feed-forward completo cuesta menos que la segunda capa que se saca.
 
 - **Batch 256 en lugar de 64.** A esta escala cada step cuesta ~20 ms *fijos* de
   lanzamiento de kernels y casi nada de cómputo: con 256 la época pasa de 2.4 s a 0.67 s sin
@@ -585,24 +588,28 @@ parámetros de escala y penalizarlos hacia cero sesga las activaciones sin regul
 
 ### Resultados de la Fase 8
 
-**Test de sobreajuste** (criterio de aceptación): loss **0.0036 < 0.01** sobre 64 ejemplos
-en 45 épocas. Si el modelo no puede memorizar 64 filas hay un bug en la máscara, en el
+**Test de sobreajuste** (criterio de aceptación): loss **0.0031 < 0.01** sobre 64 ejemplos
+en 49 épocas. Si el modelo no puede memorizar 64 filas hay un bug en la máscara, en el
 reparto de cabezas o en el cableado de las ramas, y no tiene sentido entrenar sobre todo.
 
 Entrenamiento sobre `train` (6.323 filas), validación en `valid` (1.586):
 
 | | Valor |
 |---|---|
-| ROC-AUC | **0.9701** |
-| PR-AUC | **0.7897** (prevalencia 0.1267 → lift 6.23×) |
-| log loss / Brier | 0.1723 / 0.0458 |
-| Mejor época | 36 de 46 (early stopping) |
-| Tiempo | 31 s, **0.67 s/época** |
-| Parámetros | 166.837 (87k son los embeddings de token) |
+| ROC-AUC | **0.9709** |
+| PR-AUC | **0.7736** (prevalencia 0.1267 → lift 6.10×) |
+| log loss / Brier | 0.1552 / 0.0450 |
+| Mejor época | 34 de 44 (early stopping) |
+| Tiempo | 8.5 s, **0.19 s/época** |
+| Parámetros | 149.877 (87k son los embeddings de token) |
 
 El modelo con texto supera al baseline solo-tabular (ROC 0.598) por 37 puntos, que es el
 criterio de aceptación de la fase. Contra el baseline fuerte `gbdt_sufijo` queda cerca y
-por debajo, que es lo previsible y lo que la Fase 9 va a caracterizar.
+por debajo, que es lo previsible.
+
+Es un solo split de `valid` (1.586 filas, 201 positivos), así que el PR-AUC de esta tabla
+tiene mucho más ruido que los de la Fase 9, que promedian 25 corridas. La comparación
+seria está allá.
 
 Las curvas de cada época quedan en [`experiments/curves/`](experiments/curves/) y el
 checkpoint en `checkpoints/` (gitignoreado, se regenera con un comando).
@@ -611,14 +618,21 @@ checkpoint en `checkpoints/` (gitignoreado, se regenera con un comando).
 
 ## Ablación y evaluación final (Fases 9 y 10)
 
-El código está completo y cubierto por tests; **no está corrido**. `results.csv` tiene los
-45 baselines y ninguna fila de ablación, y el conjunto de test **nunca se evaluó**.
+`results.csv` tiene **470 filas**: 45 baselines, 425 de ablación y 1 de test.
 
-**La grilla son 8 configuraciones × 5 semillas × 5 folds = 200 entrenamientos** (~35 min con
-4 procesos en paralelo). El plan proponía 27 filas con la regla *una cosa por fila*; se
-recortó porque el presupuesto real era de ~2 h y una corrida preliminar mostró que las
-variantes de arquitectura caen todas dentro del desvío entre folds. La decisión, con las
-alternativas evaluadas, está registrada en la Fase 9 de [plan.md](plan.md).
+**La grilla son 17 configuraciones × 5 semillas × 5 folds = 425 entrenamientos**
+(~60 min secuenciales en la GPU de referencia; el presupuesto declarado son 2 h).
+
+La arquitectura se explora en **cuatro familias**, todas con `d_ff / d_model = 4` — el
+ratio de *Attention is all you need*, que usa 512 → 2048 en el base y 1024 → 4096 en el
+big — salvo la familia que estudia justamente ese ratio.
+
+> **Por qué se rehizo la grilla.** La versión anterior tenía `d_ff` clavado en 128 en
+> todas sus filas, con lo cual el ratio iba de 4.0 en la receta chica a **1.33 en la
+> grande**: al revés de lo que se quería demostrar. En esa receta "grande" la atención
+> se llevaba el 60% de los parámetros del bloque, cuando lo habitual es que sea el FFN
+> el que se lleva ~2/3. Con el feed-forward sin variar, la conclusión "escalar la
+> capacidad no cambia nada" no era defendible, así que se rehizo el estudio completo.
 
 | Fila | Claves que cambia | Qué demuestra |
 |---|---|---|
@@ -627,25 +641,84 @@ alternativas evaluadas, está registrada en la Fase 9 de [plan.md](plan.md).
 | `solo_texto` | `use_tabular` | el margen de la fusión |
 | `solo_tabular` | `use_text` | el techo de ROC 0.58 |
 | `con_cart` | `include_cart` | la fuga, medida |
-| `arq_minima` | `n_layers`, `d_model`, `n_heads` | 1 capa · d32 · 1 cabeza |
-| `arq_grande` | `n_layers`, `d_model`, `n_heads` | 4 capas · d96 · 8 cabezas |
+| `ratio_1` · `ratio_2` · `ratio_8` | `d_ff` | `d_ff` ∈ {64, 128, 512}: la premisa del paper, puesta a prueba a esta escala |
+| `cabezas_1` · `cabezas_2` · `cabezas_8` | `n_heads` | `h` ∈ {1, 2, 8} a **parámetros exactamente constantes** — el diseño de la Table 3(A) del paper. `cabezas_1` da `d_head` 64, el valor del paper |
+| `ancho_32` · `d48_6cabezas` · `ancho_96` | `d_model`, `n_heads`, `d_ff` | `d_model` ∈ {32, 48, 96} manteniendo `d_head` 16 y ratio 4, que es cómo escala el paper |
+| `capas_2` · `capas_4` | `n_layers` | profundidad, ya con el ratio corregido |
 | `vocab_256` | `vocab_size` | el marcador pasa de 4 a 7.26 tokens |
 
-Dos filas mueven tres claves a propósito: son **recetas** de capacidad, y la pregunta que
-responden no es cuál de las tres importa sino si mover la capacidad en bloque cambia algo.
-Para que la tabla siga siendo auditable, cada configuración **declara** qué toca y un test
-verifica que la declaración coincida exactamente con el diff contra la base; otro test exige
-que las filas de las que se sacan conclusiones atribuibles (`solo_texto`, `solo_tabular`,
-`con_cart`) cambien una sola clave.
+Con la base en una sola capa y el ratio fijo, **14 de las 17 filas cambian una sola
+clave**. Las tres de ancho mueven tres a propósito: mantener `d_head` en 16 y el ratio en
+4 obliga a que `n_heads` y `d_ff` acompañen a `d_model`.
+
+Para que la tabla sea auditable, cada configuración **declara** qué toca y un test verifica
+que la declaración coincida exactamente con el diff contra la base. Otros tres tests
+exigen que las filas de conclusiones atribuibles cambien una sola clave, que toda la grilla
+respete `d_ff = 4 · d_model` salvo la familia del ratio, y que la familia de cabezas tenga
+los mismos parámetros en sus cuatro puntos.
 
 ```bash
 python -m src.ablations --listar                    # revisar la grilla
-for i in 0 1 2 3; do python -m src.ablations --shard $i --shards 4 & done; wait
+python -m src.ablations --shard 0 --shards 1        # 425 corridas, ~59 min
 python -m src.ablations --merge                     # -> experiments/results.csv
 python -m src.final_eval --dry-run                  # elige config con CV, no toca el test
 python -m src.final_eval                            # test, una sola vez
 cd notebooks && jupyter nbconvert --to notebook --execute --inplace 03_resultados.ipynb
 ```
+
+### Resultados de la ablación
+
+425 corridas en **58.8 min**. `z` es la diferencia contra la base en errores estándar de
+la diferencia; `|z| < 2` es indistinguible del ruido.
+
+| Fila | PR-AUC | Δ vs base | z | Veredicto |
+|---|---|---|---|---|
+| `base` | 0.8039 ± 0.025 | — | — | referencia |
+| **`sin_marcador`** | 0.1800 ± 0.010 | −0.624 | −118 | **colapso** |
+| `solo_tabular` | 0.1770 ± 0.009 | −0.627 | −120 | **colapso** |
+| `solo_texto` | 0.7029 ± 0.039 | −0.101 | −10.9 | empeora |
+| `con_cart` | 0.9468 ± 0.011 | +0.143 | +26.7 | la fuga, medida |
+| `ratio_1` · `ratio_2` · `ratio_8` | 0.8033 · 0.8055 · 0.8062 | −0.001 … +0.002 | −0.09 … 0.32 | indistinguible |
+| `cabezas_1` · `cabezas_2` · `cabezas_8` | 0.8073 · 0.8087 · 0.8065 | +0.003 … +0.005 | 0.37 … 0.70 | indistinguible |
+| `ancho_32` · `d48_6cabezas` · `ancho_96` | 0.8079 · 0.8062 · 0.7979 | −0.006 … +0.004 | −0.82 … 0.61 | indistinguible |
+| `capas_2` · `capas_4` | 0.8045 · 0.8046 | +0.001 | 0.07 … 0.10 | indistinguible |
+| `vocab_256` | 0.8102 ± 0.020 | +0.006 | 0.99 | indistinguible |
+
+**Las 12 filas de arquitectura caen en un rango de 0.011, con `|z|` máximo de 0.82.**
+Ninguna se distingue de la base ni de las otras.
+
+El resultado más directo es el del ratio: variar `d_ff` de 64 a 512 — **8×** — mueve el
+PR-AUC 0.003. El 4 de *Attention is all you need* está calibrado para un modelo de 65 M de
+parámetros entrenado sobre 4,5 M de pares de oraciones; a esta escala, con 6.300 ejemplos y
+una señal que es un marcador de 4 tokens, no hay nada que la capacidad del feed-forward
+pueda comprar. Lo mismo vale para las cabezas (cuatro puntos con **parámetros idénticos**),
+el ancho y la profundidad.
+
+Lo único que mueve la aguja es **qué información entra**, no cómo se la procesa.
+
+### Evaluación final sobre test
+
+Configuración elegida solo con CV: `vocab_256` (PR-AUC 0.8102 contra 0.8039 de la base).
+Reentrenada sobre `dev` completo por 30 épocas — la mediana de la época óptima de su propia
+CV, que es información de `dev` y ninguna de `test`.
+
+| | Valor | IC 95% (bootstrap agrupado por query) |
+|---|---|---|
+| Prevalencia del test | **0.1334** | — el piso del PR-AUC |
+| **PR-AUC** | **0.7739** (lift 5.80×) | [0.716, 0.838] |
+| **ROC-AUC** | **0.9723** | [0.965, 0.979] |
+| log loss / Brier | 0.1432 / 0.0439 | |
+| ECE | 0.0122 | |
+| mAP por query | 0.9475 | |
+| precision@1 por query | 0.905 | |
+
+El PR-AUC de test (0.774) queda por debajo del de CV (0.810), dentro del ancho del propio
+intervalo: `test` son 2.091 filas con 279 positivos y su ruido de muestreo es de ±0.06.
+
+**El test se evaluó dos veces**, y hay que decirlo: una con la arquitectura anterior
+(`d_ff` 128, 2 capas) y otra con la corregida al ratio del paper. La corrección de
+arquitectura se decidió sobre CV, no sobre el resultado de test — los dos números son
+además indistinguibles (0.805 y 0.774, con intervalos que se solapan casi por completo).
 
 ---
 

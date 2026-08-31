@@ -28,6 +28,8 @@ __pycache__/
 checkpoints/
 artifacts/
 runs/
+# Shards intermedios de la grilla de ablacion: se mergean a results.csv
+experiments/shards/
 *.pt
 *.pth
 *.ckpt

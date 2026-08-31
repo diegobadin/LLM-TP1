@@ -59,7 +59,16 @@ def test_las_conclusiones_salen_de_filas_de_un_solo_cambio():
     # De estas cuatro se afirma algo atribuible, asi que no pueden ser recetas.
     # sin_marcador es la excepcion justificada: el nivel esta codificado dos
     # veces y apagar una sola codificacion no lo saca del input.
-    atribuibles = {"solo_texto", "solo_tabular", "con_cart"}
+    atribuibles = {
+        "solo_texto", "solo_tabular", "con_cart",
+        # Con la base en una sola capa y el ratio d_ff/d_model fijo en 4, las
+        # familias de arquitectura tambien quedan de una clave: mover d_ff, las
+        # cabezas o la profundidad no arrastra nada mas.
+        "ratio_1", "ratio_2", "ratio_8",
+        "cabezas_1", "cabezas_2", "cabezas_8",
+        "capas_2", "capas_4",
+        "vocab_256",
+    }
     for nombre in atribuibles:
         assert len(A.CAMBIOS_DECLARADOS[nombre]) == 1, f"{nombre} deberia cambiar una sola clave"
     assert A.CAMBIOS_DECLARADOS["sin_marcador"] == frozenset(
@@ -68,9 +77,10 @@ def test_las_conclusiones_salen_de_filas_de_un_solo_cambio():
 
 
 def test_la_grilla_entra_en_el_presupuesto():
-    # 8 configuraciones x 5 semillas x 5 folds = 200 entrenamientos.
-    assert 6 <= len(A.GRILLA) <= 8
-    assert len(A.GRILLA) * len(A.SEEDS) * 5 <= 250
+    # 17 configuraciones x 5 semillas x 5 folds = 425 entrenamientos, ~70 min
+    # secuenciales en la GPU de referencia. El presupuesto declarado son 2 h.
+    assert 6 <= len(A.GRILLA) <= 18
+    assert len(A.GRILLA) * len(A.SEEDS) * 5 <= 450
 
 
 def test_cada_fila_explica_que_demuestra():
@@ -85,7 +95,10 @@ def test_la_grilla_cubre_lo_que_el_trabajo_tiene_que_responder():
         "sin_marcador",                        # el hallazgo central
         "solo_texto", "solo_tabular",          # que aporta cada rama
         "con_cart",                            # la fuga, medida
-        "arq_minima", "arq_grande",            # capacidad, en bloque
+        "ratio_1", "ratio_2", "ratio_8",       # la premisa del paper
+        "cabezas_1", "cabezas_2", "cabezas_8",  # Table 3(A), params constantes
+        "ancho_32", "d48_6cabezas", "ancho_96",  # ancho, con d_head 16
+        "capas_2", "capas_4",                  # profundidad
         "vocab_256",                           # el tokenizador
     }
     assert esperados <= nombres, f"faltan: {sorted(esperados - nombres)}"
@@ -94,6 +107,41 @@ def test_la_grilla_cubre_lo_que_el_trabajo_tiene_que_responder():
 def test_el_ancho_respeta_el_limite_del_enunciado():
     for config, _ in A.GRILLA:
         assert config.d_model < 100, f"{config.name}: d_model {config.d_model} >= 100"
+
+
+def test_las_arquitecturas_respetan_el_ratio_del_paper():
+    """d_ff = 4 x d_model, salvo en la familia que estudia justamente el ratio.
+
+    "Attention is all you need" usa 512 -> 2048 en el base y 1024 -> 4096 en el
+    big: ratio 4 en los dos. La grilla anterior tenia d_ff clavado en 128, con
+    lo cual el ratio iba de 4.0 en la receta chica a 1.33 en la grande, al reves
+    de lo que se pretendia demostrar.
+    """
+    familia_del_ratio = {"ratio_1", "ratio_2", "ratio_8"}
+    for config, _ in A.GRILLA:
+        if config.name in familia_del_ratio:
+            continue
+        assert config.d_ff == 4 * config.d_model, (
+            f"{config.name}: d_ff {config.d_ff} con d_model {config.d_model} "
+            f"da ratio {config.d_ff / config.d_model:.2f}, no 4"
+        )
+
+
+def test_la_familia_de_cabezas_es_a_parametros_constantes():
+    # Repartir d_model en mas cabezas no crea ni destruye pesos: W_Q/W_K/W_V/W_O
+    # siguen siendo d_model x d_model. Es lo que hace interpretable la
+    # comparacion, y es el diseno de la Table 3(A) del paper.
+    familia = ["base", "cabezas_1", "cabezas_2", "cabezas_8"]
+    configs = [c for c, _ in A.GRILLA if c.name in familia]
+    assert len(configs) == len(familia)
+    assert len({(c.d_model, c.n_layers, c.d_ff) for c in configs}) == 1
+    assert {c.n_heads for c in configs} == {1, 2, 4, 8}
+
+
+def test_la_base_tiene_una_sola_capa():
+    from src.train import BASE
+    assert BASE.n_layers == 1
+    assert BASE.d_ff == 4 * BASE.d_model
 
 
 def test_todas_las_arquitecturas_son_validas():
@@ -141,15 +189,15 @@ def _resultados_sinteticos(pr_por_config: dict[str, float], sd: float = 0.01) ->
 
 def test_gana_la_base_si_la_ventaja_no_supera_el_error_estandar():
     # +0.002 con desvio 0.03 sobre 25 corridas: el error estandar es ~0.008.
-    datos = _resultados_sinteticos({"base": 0.800, "arq_minima": 0.802}, sd=0.03)
+    datos = _resultados_sinteticos({"base": 0.800, "capas_2": 0.802}, sd=0.03)
     config, _ = F.elegir_configuracion(datos, verbose=False)
     assert config.name == "base"
 
 
 def test_gana_la_alternativa_si_la_ventaja_es_clara():
-    datos = _resultados_sinteticos({"base": 0.780, "arq_minima": 0.830}, sd=0.01)
+    datos = _resultados_sinteticos({"base": 0.780, "capas_2": 0.830}, sd=0.01)
     config, _ = F.elegir_configuracion(datos, verbose=False)
-    assert config.name == "arq_minima"
+    assert config.name == "capas_2"
 
 
 def test_las_ablaciones_diagnosticas_no_pueden_ganar():

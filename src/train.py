@@ -69,10 +69,17 @@ class RunConfig:
     vocab_size: int = 2000
 
     # -- arquitectura --------------------------------------------------------- #
+    # Una sola capa: las recetas de 1, 2 y 4 capas quedaron dentro del desvio
+    # entre folds, y con una senal de 4 tokens no hay composicionalidad que
+    # justifique apilar bloques.
+    #
+    # d_ff = 4 * d_model es el ratio de "Attention is all you need" (512 -> 2048
+    # en el base, 1024 -> 4096 en el big). La grilla lo mantiene en todas las
+    # filas salvo en la familia que justamente lo estudia.
     d_model: int = 64
     n_heads: int = 4
-    n_layers: int = 2
-    d_ff: int = 128
+    n_layers: int = 1
+    d_ff: int = 256
     dropout: float = 0.1
     pos_encoding: str = "sinusoidal"
     pooling: str = "cls"
