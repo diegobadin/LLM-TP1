@@ -6,9 +6,7 @@ Predicción del *Buy Through Rate* (BTR) sobre impresiones de productos de un
 supermercado online, con un encoder Transformer implementado desde cero.
 
 El plan de trabajo completo, con las fases, los criterios de aceptación y las
-decisiones de diseño justificadas, está en [plan.md](plan.md). Cómo funciona cada pieza —la
-arquitectura en detalle, las features, la tokenización, los experimentos y las particiones—
-está en [GUIA.md](GUIA.md).
+decisiones de diseño justificadas, está en [plan.md](plan.md).
 
 ---
 
@@ -28,8 +26,6 @@ está en [GUIA.md](GUIA.md).
 | 9 | Estudio de ablación (8 configuraciones) | código listo y testeado, **sin correr** |
 | 10 | Evaluación final e interpretabilidad | código listo y testeado, **sin correr** |
 | 11–12 | Personalización y presentación | pendiente |
-
-Cómo funciona cada pieza y cómo lanzar lo que falta: **[GUIA.md](GUIA.md)** (§11, runbook).
 
 ---
 
@@ -424,6 +420,14 @@ quedan legibles (`Seller`, no `ĠSeller`), lo que importa para los mapas de aten
 Fase 10, y la tasa de `[UNK]` pasa a ser una métrica con sentido en vez de cero por
 construcción.
 
+**¿Por qué no uno pre-entrenado del Hub?** Se midió: `bert-base-uncased` y `gpt2` funcionan
+sobre este corpus (0% de `[UNK]`, marcador entero), pero traen 30.522 y 50.257 tokens de
+vocabulario de los que **solo el 1.6% aparece en train**. El modelo pasaría de 167k
+parámetros a ~2M, casi todos embeddings que nunca reciben gradiente. Podar el vocabulario lo
+arregla, pero equivale a construir uno propio — que además da secuencias 10% más cortas
+(44.9 contra 49.3 tokens) sobre una atención que es cuadrática. El detalle está en la Fase 6
+del [plan](plan.md).
+
 ### El vocabulario satura en 1.355 tokens
 
 El corpus de train tiene solo **622 tipos de palabra**: el texto es plantillado. El BPE
@@ -613,8 +617,8 @@ El código está completo y cubierto por tests; **no está corrido**. `results.c
 **La grilla son 8 configuraciones × 5 semillas × 5 folds = 200 entrenamientos** (~35 min con
 4 procesos en paralelo). El plan proponía 27 filas con la regla *una cosa por fila*; se
 recortó porque el presupuesto real era de ~2 h y una corrida preliminar mostró que las
-variantes de arquitectura caen todas dentro del desvío entre folds. El registro de la
-decisión, con las alternativas evaluadas, está en [GUIA.md §8](GUIA.md).
+variantes de arquitectura caen todas dentro del desvío entre folds. La decisión, con las
+alternativas evaluadas, está registrada en la Fase 9 de [plan.md](plan.md).
 
 | Fila | Claves que cambia | Qué demuestra |
 |---|---|---|

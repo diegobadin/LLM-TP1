@@ -415,6 +415,18 @@ Es previsible y aceptable que el GBDT con el sufijo explícito iguale o supere a
    - *(b)* Implementar BPE a mano: contar pares de símbolos adyacentes, fusionar iterativamente el par más frecuente, guardar la tabla de merges. Con un corpus de 10.000 textos cortos corre en segundos. Toma media jornada de trabajo extra y demuestra comprensión directa del contenido de la Clase 2.
 
    Elegir *(b)* solo si la cátedra exige explícitamente no usar bibliotecas de tokenización. Si se elige *(b)*, validar contra *(a)*: entrenar ambos con el mismo vocab objetivo y verificar que las tablas de merges coinciden en los primeros cientos de merges.
+
+   **Tercera opción, evaluada y descartada con evidencia: usar un tokenizador pre-entrenado del Hub** (`Tokenizer.from_pretrained("bert-base-uncased")`, que la propia biblioteca `tokenizers` sabe bajar, sin necesidad de `transformers`). Un tokenizador **no tiene pesos**, así que no viola la letra de A3; el vocabulario, en cambio, sí se aprendió de un corpus externo y habría que declararlo. Medido sobre el split `train`:
+
+   | Tokenizador | Vocab | Ids usados en train | % del vocab | Tokens/ejemplo | `[UNK]` % | Tokens del marcador | Embeddings (d=64) |
+   |---|---|---|---|---|---|---|---|
+   | **BPE propio** | 1.355 | 625 | 46.1% | **44.9** | 0.0 | **4.00** | **86.720** |
+   | `bert-base-uncased` | 30.522 | 503 | 1.6% | 49.3 | 0.0 | 4.42 | 1.953.408 |
+   | `gpt2` | 50.257 | 806 | 1.6% | 48.9 | 0.0 | 4.95 | 3.216.448 |
+
+   Los tres funcionan sobre este corpus: cero `[UNK]` y el marcador se mantiene entero. El problema es la tabla de embeddings: con BERT el modelo pasa de 167k parámetros a ~2M y **el 98.4% de las filas del vocabulario nunca aparece en el corpus**, es decir que jamás recibirían gradiente entrenando con 6.323 ejemplos. Se arregla podando el vocabulario a los ids vistos (503 × 64 = 32k parámetros), pero podar es volver a construir un vocabulario a medida del corpus, que es exactamente lo que hace la opción *(a)*.
+
+   Se elige *(a)*: da secuencias 10% más cortas (la atención es cuadrática en la longitud), mantiene la ablación de vocabulario como experimento con sentido, conserva el contenido de la Clase 2 como entregable y no agrega una dependencia de red. Del archivo `src/tokenizer/bpe.py` (515 líneas), el entrenamiento del BPE son 61: el resto —medir `max_len`, la máscara, la tasa de `[UNK]`, la estabilidad del marcador, el round-trip, la persistencia— haría falta igual con un tokenizador bajado.
 1. Entrenar el tokenizador BPE **solo sobre el texto de train**.
 2. Vocabulario objetivo: 2.000–4.000. Justificación: el corpus tiene 8.578 productos únicos con texto plantillado y un vocabulario natural pequeño; un vocab de 30k dejaría casi todos los embeddings sin entrenar. Como todos los embeddings se entrenan desde cero (A3), el tamaño del vocabulario define directamente cuántos parámetros hay que aprender con solo ~7.900 ejemplos: es un hiperparámetro con consecuencias reales, no un detalle.
 3. Tokens especiales: `[PAD]`, `[UNK]`, `[CLS]`, `[SEP]`.
@@ -610,7 +622,7 @@ El modelo es chico (`d_model` 64, 2 capas, ~90 tokens) y el dataset tiene 10.000
 
 **Protocolo.** Cada configuración se corre con **5 semillas** sobre la CV agrupada de 5 folds de `dev`, es decir 25 entrenamientos por fila. Se reporta media ± desvío. **8 configuraciones × 25 = 200 entrenamientos**, unos 35 minutos con 4 procesos en paralelo sobre la GPU.
 
-**Cambio respecto de la versión original de este plan.** La grilla proponía 27 filas con la regla *una sola cosa por fila*. Se recortó a 8 por dos razones medidas en la Fase 8: (a) el presupuesto real es de ~2 h para las 27, no de minutos, porque a esta escala cada step está dominado por el overhead de lanzamiento de kernels; y (b) una corrida preliminar mostró que las variantes de arquitectura caen todas dentro del desvío entre folds, es decir que la mayoría de esas filas iban a decir "indistinguible". El detalle de las alternativas evaluadas —OFAT recortado, recetas y factorial fraccionado— está en la sección 8 de [GUIA.md](GUIA.md).
+**Cambio respecto de la versión original de este plan.** La grilla proponía 27 filas con la regla *una sola cosa por fila*. Se recortó a 8 por dos razones medidas en la Fase 8: (a) el presupuesto real es de ~2 h para las 27, no de minutos, porque a esta escala cada step está dominado por el overhead de lanzamiento de kernels; y (b) una corrida preliminar mostró que las variantes de arquitectura caen todas dentro del desvío entre folds, es decir que la mayoría de esas filas iban a decir "indistinguible". Se evaluaron tres alternativas antes de elegir: **OFAT recortado** (7 filas, una clave cada una, sin decir nada de arquitectura), **recetas** (6 filas, paquetes coherentes sin atribución por factor) y **factorial fraccionado** (8 filas, resolución III, que estima efectos principales de hasta 7 factores binarios asumiendo interacciones chicas). Se eligió un híbrido de las dos primeras: las filas de las que salen conclusiones quedan con una sola clave, y la capacidad se mueve en bloque con dos recetas.
 
 **La regla pasa a ser explícita.** Las filas de las que salen conclusiones atribuibles cambian **una sola** clave. Dos filas mueven tres a la vez, a propósito: son *recetas* de capacidad, y la pregunta que responden no es cuál de las tres claves importa sino si mover la capacidad en bloque cambia algo. Para que la tabla siga siendo auditable, cada configuración **declara** qué claves toca (`CAMBIOS_DECLARADOS` en `src/ablations.py`, que arma el propio constructor) y un test verifica que la declaración coincida exactamente con el diff contra la base. Un segundo test exige que `solo_texto`, `solo_tabular` y `con_cart` sigan siendo de un solo cambio.
 
@@ -735,6 +747,7 @@ Preparar respuesta para cada una:
 11. ¿Qué aprendió realmente el modelo? (Respuesta honesta: a leer un marcador de reputación insertado sintéticamente)
 12. ¿Cómo evitaron que la misma query esté en train y test?
 13. ¿Cuántas veces miraron el test?
+14. ¿Por qué no usaron un tokenizador pre-entrenado, si un tokenizador no tiene pesos? (Respuesta: se midió. Funciona, pero con 30k de vocabulario el 98.4% de los embeddings nunca recibiría gradiente; podarlo equivale a construir uno propio, y el propio además da secuencias 10% más cortas. Ver Fase 6, paso 0)
 
 ---
 
