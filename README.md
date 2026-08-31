@@ -15,10 +15,63 @@ decisiones de diseño justificadas, está en [plan.md](plan.md).
 | Fase | Contenido | Estado |
 |---|---|---|
 | 0 | Setup, semillas, estructura | hecho |
-| 1 | Carga y auditoría de fugas | pendiente |
+| 1 | Carga y auditoría de fugas | hecho |
 | 2 | EDA formal (Ejercicio 1) | pendiente |
 | 3 | Target y partición | pendiente |
 | 4–12 | Features, baselines, tokenizer, Transformer, ablaciones | pendiente |
+
+---
+
+## El problema
+
+Cada fila del dataset es una **impresión**: un producto mostrado dentro de los
+resultados de una búsqueda con filtros (`query_id`). El target es `bought`, y la
+probabilidad predicha *es* el Buy Through Rate del producto en ese contexto.
+
+Formulación elegida: **clasificación binaria a nivel impresión**. No se usa una
+formulación *listwise* con softmax sobre la query porque hay queries con
+múltiples compras (670 queries con 1 compra, 226 con 2, 53 con 3, 5 con 4): el
+problema no es de elección única.
+
+### Momento de la predicción
+
+> El momento de la predicción es el instante previo a mostrar la página de
+> resultados, cuando el sistema decide qué productos promocionar.
+
+Esta frase es el criterio contra el cual se juzga cada columna. Sin ella,
+"fuga" es una opinión. Está congelada en
+[`src/data/load.py`](src/data/load.py) como `PREDICTION_MOMENT`.
+
+### Auditoría de fugas
+
+Las 22 columnas del CSV están auditadas una por una en `COLUMN_AUDIT`, con el
+momento en que su valor queda determinado, si está disponible al momento de
+predecir, el veredicto y el motivo escrito. La lista resultante,
+`FEATURES_ADMITIDAS`, es la única fuente de verdad sobre qué puede entrar al
+pipeline.
+
+```bash
+python -m src.data.load      # imprime la auditoría y verifica los hechos del plan
+```
+
+**Columnas excluidas (3):**
+
+| Columna | Motivo |
+|---|---|
+| `cart` | **Fuga.** `P(bought = 1 \| cart = False) = 0.0000` exacto sobre 6.993 filas: agregar al carrito es condición necesaria de la compra. Además su valor es posterior al momento de la predicción, que es la razón causal por la que se excluye — independientemente de cuánta métrica aporte. |
+| `filter_category` | Idéntica a `category` en el 100% de las filas. Duplica la señal sin agregar información. |
+| `filter_storage_type` | Idéntica a `storage_type` en el 100% de las filas. |
+
+`query_id` no es feature: es la **clave de agrupamiento** de la partición.
+Tiene 2.012 valores únicos y codificarla solo memoriza. `bought` es el target.
+
+Quedan **17 columnas admitidas**.
+
+Las features de "coherencia con el filtro" (`category == filter_category`,
+`storage_type == filter_storage_type`, `filter_price_min <= price <=
+filter_price_max`) **no se construyen**: las tres condiciones se cumplen en el
+100% de las filas, así que serían constantes. Sí es útil `price_pos`, que mide
+dónde cae el precio dentro del rango del filtro y no es constante.
 
 ---
 
@@ -76,6 +129,24 @@ OK: 20 steps identicos bit a bit en dos corridas.
 
 El mismo *fingerprint* se obtuvo en corridas separadas del proceso y con
 `--num-workers 2`.
+
+---
+
+## Tests
+
+```bash
+pytest                      # todo
+pytest -m "not data"        # solo lo que no necesita el CSV
+```
+
+Los criterios de aceptación de cada fase están escritos como tests, no como
+prosa: que la auditoría cubra las 22 columnas, que `cart` esté excluida, que
+`query_id` sea grupo y no feature, que ninguna columna posterior al momento de
+la predicción entre a `FEATURES_ADMITIDAS`, y que los hechos de la sección 0
+del plan se reproduzcan sobre el CSV.
+
+Los tests marcados con `@pytest.mark.data` necesitan
+`data/raw/supermarket_products.csv` y se saltean solos si no está.
 
 ---
 
