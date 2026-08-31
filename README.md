@@ -22,7 +22,8 @@ decisiones de diseño justificadas, está en [plan.md](plan.md).
 | 5 | Baselines | hecho |
 | 6 | Tokenizador BPE | hecho |
 | 7 | Transformer desde cero (bloques + tests) | hecho |
-| 8–12 | Modelo completo, entrenamiento, ablaciones, presentación | pendiente |
+| 8 | Modelo completo y entrenamiento | hecho |
+| 9–12 | Ablaciones, evaluación final, presentación | pendiente |
 
 ---
 
@@ -519,6 +520,82 @@ de por qué el positional encoding hace falta, y se pueden mostrar en la present
   la fila de `[PAD]` en cero y sin gradiente, lineales con Xavier uniforme, bias en cero, y
   el bias de salida en **`log(0.13/0.87) = −1.90`**, así el modelo arranca prediciendo la
   tasa base.
+
+---
+
+## Modelo completo y entrenamiento
+
+```bash
+python -m src.train --overfit    # test de sobreajuste sobre 64 ejemplos
+python -m src.train              # entrena en train, valida en valid, guarda checkpoint
+```
+
+```
+text ──► tokenizer ──► emb + PE ──► 2 × EncoderBlock ──► pooling ──► h_txt (64)
+                                                                        │
+categóricas ──► nn.Embedding por columna ──┐                            │
+numéricas   ──► escaladas ─────────────────┴──► MLP ──► h_tab (32) ─────┤
+                                                                        ▼
+                                                  concat ──► MLP ──► logit
+```
+
+**Por qué fusionar.** La rama de texto sola llega a ROC ≈ 0.958 y la tabular sola a 0.598,
+pero el baseline que combina el marcador con las tabulares llega a PR-AUC 0.808. Esos 12
+puntos vienen de `allergens` y `category` modulando la compra dentro del nivel ALTO: la
+fusión es donde está el margen, no un adorno.
+
+Una corrida es un `RunConfig` (features + tokenizador + arquitectura + optimización en un
+solo objeto). Cada fila de la ablación de la Fase 9 es `replace(BASE, ...)` cambiando **una**
+clave, nunca una edición del código. Todo lo que depende de los datos —`FeaturePipeline` y
+tokenizador BPE— se ajusta **por fold y solo con train**.
+
+### Configuración base
+
+| | | | |
+|---|---|---|---|
+| `d_model` | 64 | Optimizador | AdamW, `lr` 1e-3, `wd` 1e-2 |
+| `n_heads` | 4 (`d_head` 16) | Scheduler | warmup lineal 10% + coseno |
+| `n_layers` | 2 | Batch | 256 |
+| `d_ff` | 128 | Loss | `BCEWithLogitsLoss` |
+| `dropout` | 0.1 | Grad clipping | 1.0 |
+| Normalización | pre-LN | Early stopping | PR-AUC de valid, `patience` 10 |
+
+Dos desvíos respecto del plan, los dos medidos:
+
+- **Batch 256 en lugar de 64.** A esta escala cada step cuesta ~20 ms *fijos* de
+  lanzamiento de kernels y casi nada de cómputo: con 256 la época pasa de 2.4 s a 0.67 s sin
+  mover la métrica. El `lr` se escala linealmente con el batch (3e-4 × 4 = 1e-3), que es la
+  regla estándar; 6e-4, 1e-3 y 2e-3 quedan dentro del desvío entre folds, así que se toma el
+  valor que justifica la regla y no la búsqueda.
+- **El dataset entero vive en la GPU** (unos 5 MB) y los batches se indexan ahí mismo, en
+  lugar de apilar 256 filas sueltas con `torch.stack` en cada paso.
+
+`weight_decay` se aplica solo a las matrices: los bias y las ganancias de `LayerNorm` son
+parámetros de escala y penalizarlos hacia cero sesga las activaciones sin regularizar nada.
+
+### Resultados de la Fase 8
+
+**Test de sobreajuste** (criterio de aceptación): loss **0.0036 < 0.01** sobre 64 ejemplos
+en 45 épocas. Si el modelo no puede memorizar 64 filas hay un bug en la máscara, en el
+reparto de cabezas o en el cableado de las ramas, y no tiene sentido entrenar sobre todo.
+
+Entrenamiento sobre `train` (6.323 filas), validación en `valid` (1.586):
+
+| | Valor |
+|---|---|
+| ROC-AUC | **0.9701** |
+| PR-AUC | **0.7897** (prevalencia 0.1267 → lift 6.23×) |
+| log loss / Brier | 0.1723 / 0.0458 |
+| Mejor época | 36 de 46 (early stopping) |
+| Tiempo | 31 s, **0.67 s/época** |
+| Parámetros | 166.581 (87k son los embeddings de token) |
+
+El modelo con texto supera al baseline solo-tabular (ROC 0.598) por 37 puntos, que es el
+criterio de aceptación de la fase. Contra el baseline fuerte `gbdt_sufijo` queda cerca y
+por debajo, que es lo previsible y lo que la Fase 9 va a caracterizar.
+
+Las curvas de cada época quedan en [`experiments/curves/`](experiments/curves/) y el
+checkpoint en `checkpoints/` (gitignoreado, se regenera con un comando).
 
 ---
 

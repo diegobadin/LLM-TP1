@@ -158,31 +158,70 @@ class MultiHeadSelfAttention(nn.Module):
 
     # -- forward ------------------------------------------------------------- #
 
-    def forward(self, x: Tensor, padding_mask: Tensor | None = None) -> Tensor:
-        """``x``: ``(batch, seq, d_model)``. ``padding_mask``: ``(batch, seq)``, True = real."""
+    def forward(
+        self,
+        x: Tensor,
+        padding_mask: Tensor | None = None,
+        attn_mask: Tensor | None = None,
+    ) -> Tensor:
+        """``x``: ``(batch, seq, d_model)``. ``padding_mask``: ``(batch, seq)``, True = real.
+
+        ``attn_mask`` es una mascara booleana opcional por par (consulta, clave),
+        de forma ``(batch, seq, seq)`` o ``(1, seq, seq)``, tambien con True =
+        permitido. La usa la atencion cross-item de la Fase 9, donde lo que
+        restringe no es el padding sino a que query pertenece cada item.
+        """
         if self.attn_impl == "torch_mha":
+            if attn_mask is not None:
+                raise ValueError("el modo torch_mha no acepta attn_mask; es solo para tests")
             return self._forward_torch_mha(x, padding_mask)
 
         q = self._split_heads(self.w_q(x))
         k = self._split_heads(self.w_k(x))
         v = self._split_heads(self.w_v(x))
+        permitido = self._combinar_mascaras(x, padding_mask, attn_mask)
 
         if self.attn_impl == "scratch":
+            aditiva = None if permitido is None else (~permitido).to(x.dtype) * MASK_VALUE
             salida, pesos = scaled_dot_product_attention(
-                q, k, v, additive_mask(padding_mask, x.dtype), self.attn_dropout
+                q, k, v, aditiva, self.attn_dropout
             )
             self.last_attn_weights = pesos.detach()
         else:  # torch_sdpa
             # La mascara booleana de torch tiene la MISMA convencion que la
-            # nuestra en esta funcion: True = la posicion participa.
-            mascara = None if padding_mask is None else padding_mask[:, None, None, :].bool()
+            # nuestra: True = la posicion participa.
             salida = F.scaled_dot_product_attention(
-                q, k, v, attn_mask=mascara,
+                q, k, v, attn_mask=permitido,
                 dropout_p=self.attn_dropout.p if self.training else 0.0,
             )
             self.last_attn_weights = None
 
         return self.w_o(self._merge_heads(salida))
+
+    @staticmethod
+    def _combinar_mascaras(
+        x: Tensor, padding_mask: Tensor | None, attn_mask: Tensor | None
+    ) -> Tensor | None:
+        """Una sola mascara booleana ``(B, 1, Lq, Lk)`` con True = permitido."""
+        partes = []
+        if padding_mask is not None:
+            if padding_mask.dim() != 2:
+                raise ValueError(
+                    f"padding_mask debe ser (batch, seq), llego {tuple(padding_mask.shape)}"
+                )
+            partes.append(padding_mask.bool()[:, None, None, :])
+        if attn_mask is not None:
+            if attn_mask.dim() != 3:
+                raise ValueError(
+                    f"attn_mask debe ser (batch, seq, seq), llego {tuple(attn_mask.shape)}"
+                )
+            partes.append(attn_mask.bool().unsqueeze(1))
+        if not partes:
+            return None
+        combinada = partes[0]
+        for parte in partes[1:]:
+            combinada = combinada & parte
+        return combinada
 
     def _forward_torch_mha(self, x: Tensor, padding_mask: Tensor | None) -> Tensor:
         """Camino de verificacion: delega en ``nn.MultiheadAttention``.

@@ -168,11 +168,16 @@ class EncoderBlock(nn.Module):
         self.norm_ff = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: Tensor, padding_mask: Tensor | None = None) -> Tensor:
+    def forward(
+        self,
+        x: Tensor,
+        padding_mask: Tensor | None = None,
+        attn_mask: Tensor | None = None,
+    ) -> Tensor:
         if self.norm_kind == "pre_ln":
-            x = x + self.dropout(self.attn(self.norm_attn(x), padding_mask))
+            x = x + self.dropout(self.attn(self.norm_attn(x), padding_mask, attn_mask))
             return x + self.dropout(self.ff(self.norm_ff(x)))
-        x = self.norm_attn(x + self.dropout(self.attn(x, padding_mask)))
+        x = self.norm_attn(x + self.dropout(self.attn(x, padding_mask, attn_mask)))
         return self.norm_ff(x + self.dropout(self.ff(x)))
 
     @property
