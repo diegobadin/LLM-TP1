@@ -20,7 +20,8 @@ decisiones de diseño justificadas, está en [plan.md](plan.md).
 | 3 | Target y partición | hecho |
 | 4 | Features y preprocesamiento | hecho |
 | 5 | Baselines | hecho |
-| 6–12 | Tokenizer, Transformer, ablaciones, presentación | pendiente |
+| 6 | Tokenizador BPE | hecho |
+| 7–12 | Transformer, entrenamiento, ablaciones, presentación | pendiente |
 
 ---
 
@@ -384,6 +385,63 @@ commit. Las medias y los desvíos se calculan al leer, nunca se guardan agregado
 |---|---|
 | `fig_09_baselines.png` | ROC-AUC y PR-AUC por baseline, con el piso de cada métrica |
 | `fig_10_curvas_baselines.png` | Curvas ROC y PR *out-of-fold* sobre `dev` |
+
+---
+
+## Tokenizador
+
+```bash
+python -m src.tokenizer.bpe              # entrena, mide, verifica y guarda
+python -m src.tokenizer.bpe --ablacion   # tabla de tamaños de vocabulario
+```
+
+BPE entrenado **desde cero con los textos del TP** (decisión A3: la biblioteca
+`tokenizers` aporta el algoritmo, no pesos). Se entrena **solo con el texto de train**:
+el vocabulario BPE sale de las frecuencias del corpus, así que construirlo sobre el
+dataset completo filtraría información de test hacia train.
+
+Formato de entrada: `[CLS] título [SEP] descripción [SEP]`, con `[PAD]`=0, `[UNK]`=1,
+`[CLS]`=2, `[SEP]`=3. Que `[PAD]` sea 0 hace que la máscara sea `ids != 0` y que el
+embedding de padding sea la fila 0, que se inicializa en cero y se excluye del gradiente.
+
+| Criterio de aceptación | Resultado |
+|---|---|
+| `max_len` **medido**, no elegido a ojo | p99 = 52 sobre train → **56** (múltiplo de 8 siguiente). 0% de ejemplos truncados en train y en valid |
+| Tasa de `[UNK]` en validación < 1% | **0.0000%** |
+| Round-trip salvo espaciado | exacto sobre 4.000 textos |
+| Marcador de reputación estable | **19/19** marcadores se tokenizan igual en todo contexto, en 4 tokens: `( Best Seller )` |
+
+Se usa un pre-tokenizador `Whitespace` en lugar de ByteLevel a propósito: los tokens
+quedan legibles (`Seller`, no `ĠSeller`), lo que importa para los mapas de atención de la
+Fase 10, y la tasa de `[UNK]` pasa a ser una métrica con sentido en vez de cero por
+construcción.
+
+### El vocabulario satura en 1.355 tokens
+
+El corpus de train tiene solo **622 tipos de palabra**: el texto es plantillado. El BPE
+llega a 1.355 tokens (alfabeto + subpalabras + las 622 palabras enteras + los 4 especiales)
+y ahí **no quedan pares adyacentes que fusionar**. Verificado con `min_frequency` 1, 2 y 3:
+el techo es el mismo.
+
+Consecuencia: la grilla de ablación que propone el plan ({1.000, 2.000, 4.000, 8.000})
+**degenera** — de 2.000 en adelante es literalmente el mismo tokenizador. La ablación útil
+va hacia abajo:
+
+| Vocab pedido | Vocab real | `max_len` | Tokens/ejemplo | Tokens del marcador |
+|---|---|---|---|---|
+| 256 | 256 | 104 | 79.3 | 7.26 |
+| 512 | 512 | 80 | 60.9 | 4.89 |
+| 1.000 | 1.000 | 64 | 47.7 | 4.00 |
+| **2.000** | **1.355** | **56** | **44.9** | **4.00** |
+
+Con 256 tokens el marcador se fragmenta y el modelo tiene que recomponerlo antes de poder
+usarlo; con 1.000 ya entra entero. Ese es el efecto que la ablación de la Fase 9 va a medir
+sobre la métrica final.
+
+El tokenizador serializado va a `data/tokenizer/` (gitignoreado, regenerable con una línea).
+Lo versionado es `EXPECTED_FINGERPRINT`, un hash del vocabulario y los merges, verificado
+por un test. Para la CV **se reentrena por fold**: cuesta menos de un segundo, así que no
+hace falta ni siquiera aceptar el sesgo de entrenarlo una vez sobre `dev`.
 
 ---
 

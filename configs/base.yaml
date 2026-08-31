@@ -35,10 +35,13 @@ features:
   descartadas: [ingredients, timestamp]
 
 tokenizer:
-  kind: bpe
-  vocab_size: 4000
-  max_len: null         # se mide en la Fase 6 (percentil 99), no se elige a ojo
+  kind: bpe             # entrenado sobre el corpus del TP, sin pesos externos
+  vocab_size: 2000      # devuelve 1.355: el BPE satura ahi (622 tipos de palabra)
+  max_len: 56           # MEDIDO: p99 = 52 sobre train, al multiplo de 8 siguiente
   special_tokens: ["[PAD]", "[UNK]", "[CLS]", "[SEP]"]
+  # Grilla de la ablacion de vocabulario, reescalada hacia abajo: la del plan
+  # ({1000, 2000, 4000, 8000}) da el mismo tokenizador de 2.000 en adelante.
+  vocabs_ablacion: [256, 512, 1000, 2000]
 
 model:
   d_model: 64
