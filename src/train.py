@@ -137,7 +137,7 @@ class FoldData:
 
     train: ImpressionsDataset
     eval: ImpressionsDataset
-    model_config: ModelConfig
+    model_config: ModelConfig | None
     tokenizer: BPETokenizer | None
     pipeline: FeaturePipeline
     eval_index: np.ndarray = field(default_factory=lambda: np.array([]))
@@ -179,9 +179,25 @@ def prepare_fold(
         Xev, *tokens_ev, group=None if grupos is None else grupos[1]
     )
 
-    model_config = ModelConfig(
-        vocab_size=tokenizer.vocab_size if tokenizer else 0,
-        max_len=tokenizer.max_len if tokenizer else 0,
+    fold = FoldData(train_ds, eval_ds, None, tokenizer, pipe, np.asarray(eval_idx))
+    fold.model_config = model_config_de(run, fold)
+    return fold
+
+
+def model_config_de(run: RunConfig, fold: FoldData) -> ModelConfig:
+    """La arquitectura que pide ``run``, dimensionada con los datos de ``fold``.
+
+    Se construye aparte de ``prepare_fold`` a proposito. La Fase 9 cachea los
+    datos preparados —son los mismos para todas las corridas que no cambian el
+    texto ni las columnas— y **tiene que rearmar la arquitectura en cada
+    corrida**: si reutilizara la del fold cacheado, una ablacion de profundidad
+    o de cabezas entrenaria la arquitectura de la corrida anterior y la fila
+    saldria identica a ella. Es un bug que no rompe nada y produce una tabla de
+    ablacion falsa.
+    """
+    return ModelConfig(
+        vocab_size=fold.tokenizer.vocab_size if fold.tokenizer else 0,
+        max_len=fold.tokenizer.max_len if fold.tokenizer else 0,
         d_model=run.d_model,
         n_heads=run.n_heads,
         n_layers=run.n_layers,
@@ -190,17 +206,16 @@ def prepare_fold(
         pooling=run.pooling,
         norm=run.norm,
         attn_impl=run.attn_impl,
-        cat_cardinalities=pipe.cardinalidades,
-        d_num=Xtr.num.shape[1],
+        cat_cardinalities=fold.pipeline.cardinalidades,
+        d_num=int(fold.train.num.shape[1]),
         cat_emb_dim=run.cat_emb_dim,
         d_tab=run.d_tab,
         dropout=run.dropout,
-        prevalence=float(Xtr.y.mean()),
+        prevalence=float(fold.train.y.mean()),
         use_text=run.use_text,
         use_tabular=run.use_tabular,
         use_cross_item=run.use_cross_item,
     )
-    return FoldData(train_ds, eval_ds, model_config, tokenizer, pipe, np.asarray(eval_idx))
 
 
 def _encode(tokenizer: BPETokenizer, X, campo: str):
@@ -310,8 +325,19 @@ def train_model(
     fold: FoldData,
     run: RunConfig = BASE,
     verbose: bool = False,
+    select_best: bool = True,
 ) -> TrainResult:
-    """Entrena con early stopping sobre la metrica de validacion del ``run``."""
+    """Entrena y devuelve el modelo, sus curvas y sus predicciones.
+
+    ``select_best`` (el default) se queda con la epoca de mejor metrica sobre
+    ``fold.eval`` y aplica early stopping. Eso **solo es valido cuando
+    ``fold.eval`` es una particion de validacion**: elegir la epoca mirando la
+    metrica es una decision de modelo, y tomarla contra el test seria espiarlo.
+
+    Para la evaluacion final de la Fase 10 se pasa ``select_best=False``: se
+    entrena la cantidad de epocas fijada de antemano por la CV y se reporta el
+    estado final, sin mirar la metrica de test para nada.
+    """
     set_seed(run.seed)
 
     model = build_model(fold.model_config).to(DEVICE)
@@ -363,6 +389,10 @@ def train_model(
             ultima = historia[-1]
             print(f"  epoca {epoca:>3}  loss {ultima['train_loss']:.4f}  "
                   f"ROC {ultima['roc_auc']:.4f}  PR {ultima['pr_auc']:.4f}")
+
+        if not select_best:
+            mejor_epoca, mejor_pred = epoca, (y_true, y_prob)
+            continue
 
         actual = metricas[run.metric]
         if actual > mejor:

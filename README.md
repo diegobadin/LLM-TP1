@@ -6,7 +6,9 @@ Predicción del *Buy Through Rate* (BTR) sobre impresiones de productos de un
 supermercado online, con un encoder Transformer implementado desde cero.
 
 El plan de trabajo completo, con las fases, los criterios de aceptación y las
-decisiones de diseño justificadas, está en [plan.md](plan.md).
+decisiones de diseño justificadas, está en [plan.md](plan.md). Cómo funciona cada pieza —la
+arquitectura en detalle, las features, la tokenización, los experimentos y las particiones—
+está en [GUIA.md](GUIA.md).
 
 ---
 
@@ -23,7 +25,11 @@ decisiones de diseño justificadas, está en [plan.md](plan.md).
 | 6 | Tokenizador BPE | hecho |
 | 7 | Transformer desde cero (bloques + tests) | hecho |
 | 8 | Modelo completo y entrenamiento | hecho |
-| 9–12 | Ablaciones, evaluación final, presentación | pendiente |
+| 9 | Estudio de ablación (8 configuraciones) | código listo y testeado, **sin correr** |
+| 10 | Evaluación final e interpretabilidad | código listo y testeado, **sin correr** |
+| 11–12 | Personalización y presentación | pendiente |
+
+Cómo funciona cada pieza y cómo lanzar lo que falta: **[GUIA.md](GUIA.md)** (§11, runbook).
 
 ---
 
@@ -588,7 +594,7 @@ Entrenamiento sobre `train` (6.323 filas), validación en `valid` (1.586):
 | log loss / Brier | 0.1723 / 0.0458 |
 | Mejor época | 36 de 46 (early stopping) |
 | Tiempo | 31 s, **0.67 s/época** |
-| Parámetros | 166.581 (87k son los embeddings de token) |
+| Parámetros | 166.837 (87k son los embeddings de token) |
 
 El modelo con texto supera al baseline solo-tabular (ROC 0.598) por 37 puntos, que es el
 criterio de aceptación de la fase. Contra el baseline fuerte `gbdt_sufijo` queda cerca y
@@ -596,6 +602,46 @@ por debajo, que es lo previsible y lo que la Fase 9 va a caracterizar.
 
 Las curvas de cada época quedan en [`experiments/curves/`](experiments/curves/) y el
 checkpoint en `checkpoints/` (gitignoreado, se regenera con un comando).
+
+---
+
+## Ablación y evaluación final (Fases 9 y 10)
+
+El código está completo y cubierto por tests; **no está corrido**. `results.csv` tiene los
+45 baselines y ninguna fila de ablación, y el conjunto de test **nunca se evaluó**.
+
+**La grilla son 8 configuraciones × 5 semillas × 5 folds = 200 entrenamientos** (~35 min con
+4 procesos en paralelo). El plan proponía 27 filas con la regla *una cosa por fila*; se
+recortó porque el presupuesto real era de ~2 h y una corrida preliminar mostró que las
+variantes de arquitectura caen todas dentro del desvío entre folds. El registro de la
+decisión, con las alternativas evaluadas, está en [GUIA.md §8](GUIA.md).
+
+| Fila | Claves que cambia | Qué demuestra |
+|---|---|---|
+| `base` | — | referencia |
+| **`sin_marcador`** | `keep_suffix`, `keep_reputation_sentence` | el hallazgo central: sin las dos codificaciones del nivel, colapso |
+| `solo_texto` | `use_tabular` | el margen de la fusión |
+| `solo_tabular` | `use_text` | el techo de ROC 0.58 |
+| `con_cart` | `include_cart` | la fuga, medida |
+| `arq_minima` | `n_layers`, `d_model`, `n_heads` | 1 capa · d32 · 1 cabeza |
+| `arq_grande` | `n_layers`, `d_model`, `n_heads` | 4 capas · d96 · 8 cabezas |
+| `vocab_256` | `vocab_size` | el marcador pasa de 4 a 7.26 tokens |
+
+Dos filas mueven tres claves a propósito: son **recetas** de capacidad, y la pregunta que
+responden no es cuál de las tres importa sino si mover la capacidad en bloque cambia algo.
+Para que la tabla siga siendo auditable, cada configuración **declara** qué toca y un test
+verifica que la declaración coincida exactamente con el diff contra la base; otro test exige
+que las filas de las que se sacan conclusiones atribuibles (`solo_texto`, `solo_tabular`,
+`con_cart`) cambien una sola clave.
+
+```bash
+python -m src.ablations --listar                    # revisar la grilla
+for i in 0 1 2 3; do python -m src.ablations --shard $i --shards 4 & done; wait
+python -m src.ablations --merge                     # -> experiments/results.csv
+python -m src.final_eval --dry-run                  # elige config con CV, no toca el test
+python -m src.final_eval                            # test, una sola vez
+cd notebooks && jupyter nbconvert --to notebook --execute --inplace 03_resultados.ipynb
+```
 
 ---
 

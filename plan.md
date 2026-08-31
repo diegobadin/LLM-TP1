@@ -128,7 +128,7 @@ Lecturas obligatorias de esta tabla:
 | A1 | Framework | **PyTorch** | Fases 7 y 8 se escriben en PyTorch |
 | A2 | Cómputo | **GPU local / de laboratorio** | El costo computacional no es limitante: el protocolo de ablación pasa a 5 semillas × 5 folds |
 | A3 | Alcance del encoder | **Todo desde cero, sin pre-entrenados** | Se elimina la rama de transfer learning de la Fase 9. El vocabulario, los embeddings de token, el positional encoding y los pesos de atención se aprenden desde inicialización aleatoria |
-| A4 | Atención cross-item entre productos de una query | **Se implementa como ablación de baja prioridad** | Con GPU el costo marginal es despreciable. La evidencia de la sección 0.4 anticipa ganancia nula (tasas 0.643 / 0.645 / 0.670 / 0.630 según la cantidad de ítems ALTO compitiendo). Se corre y se reporta como resultado negativo, que es tan válido como uno positivo |
+| A4 | Atención cross-item entre productos de una query | **Se implementa como ablación de baja prioridad** | La evidencia de la sección 0.4 anticipa ganancia nula (tasas 0.643 / 0.645 / 0.670 / 0.630 según la cantidad de ítems ALTO compitiendo). **Estado**: implementada y testeada (`CrossItemAttention` + `QueryBatchSampler`), pero fuera de la grilla reducida de la Fase 9; correrla es agregar una línea a `GRILLA` |
 
 **Nota sobre A3.** "Desde cero" se refiere a los pesos del modelo, no a las bibliotecas. Usar `tokenizers` de HuggingFace para *entrenar* un BPE sobre el corpus propio no viola la restricción: el tokenizador se ajusta con los datos del TP, no descarga nada pre-entrenado. Lo que queda excluido es cargar pesos de BERT, MiniLM, GloVe, word2vec o cualquier checkpoint público. Si la cátedra interpreta la restricción de forma más estricta, la alternativa es implementar el algoritmo BPE a mano (ver Fase 6, paso 0).
 
@@ -422,7 +422,9 @@ Es previsible y aceptable que el GBDT con el sufijo explícito iguale o supere a
 5. Medir la distribución de longitudes en tokens sobre train y fijar `max_len` en el percentil 99, redondeado hacia arriba. Con títulos de 6–14 palabras y descripciones de 19–32, se espera algo del orden de 80–110 tokens BPE; **medirlo, no asumirlo**.
 6. Verificar que el sufijo se tokeniza de forma estable (por ejemplo, que `Best Seller` no se fragmente distinto según el contexto). Si el sufijo se parte en sub-tokens inconsistentes, el modelo tiene que reconstruirlo y el problema se vuelve innecesariamente difícil. Es un chequeo barato y decisivo.
 7. Guardar el tokenizador entrenado. Para la CV, reentrenarlo por fold o aceptar y documentar el sesgo mínimo de entrenarlo una vez sobre `dev`.
-8. Ablación de tamaño de vocabulario: {1.000, 2.000, 4.000, 8.000}. Con GPU es barata y conecta directamente con el contenido de la Clase 2.
+8. Ablación de tamaño de vocabulario. Conecta directamente con el contenido de la Clase 2.
+
+   **Corrección medida.** La grilla {1.000, 2.000, 4.000, 8.000} **degenera**: el corpus de train tiene solo **622 tipos de palabra** y el BPE satura en **1.355 tokens** (verificado con `min_frequency` 1, 2 y 3), así que de 2.000 en adelante devuelve exactamente el mismo tokenizador. La ablación útil va hacia abajo — {256, 512, 1.000, 2.000} —, donde el efecto sí es visible: con 256 el marcador de reputación se parte en 7.26 sub-tokens y con 1.000 ya entra entero en 4. La grilla reducida de la Fase 9 se queda con el extremo (`vocab_256`), que es el que mueve algo.
 
 **Justificación.** El vocabulario BPE se construye a partir de frecuencias del corpus. Construirlo sobre el dataset completo filtra información de test a train. Es una fuga sutil y de impacto bajo en este caso, pero mencionarla y manejarla explícitamente es exactamente el tipo de rigor que el enunciado evalúa.
 
@@ -606,26 +608,24 @@ El modelo es chico (`d_model` 64, 2 capas, ~90 tokens) y el dataset tiene 10.000
 
 **Entregable.** `experiments/results.csv` completo + `notebooks/03_resultados.ipynb`.
 
-**Protocolo.** Cada configuración se corre con **5 semillas** sobre la CV agrupada de 5 folds de `dev`, es decir 25 entrenamientos por fila. Se reporta media ± desvío. Cada fila cambia **una sola cosa** respecto de la configuración base.
+**Protocolo.** Cada configuración se corre con **5 semillas** sobre la CV agrupada de 5 folds de `dev`, es decir 25 entrenamientos por fila. Se reporta media ± desvío. **8 configuraciones × 25 = 200 entrenamientos**, unos 35 minutos con 4 procesos en paralelo sobre la GPU.
 
-Con GPU (decisión A2) y un modelo de este tamaño, cada entrenamiento es cuestión de segundos a un par de minutos. Las 25 corridas por fila son perfectamente asumibles y reducen sustancialmente el ruido en la comparación, que es el principal problema con 1.301 positivos. Estimar el presupuesto total tras medir el tiempo por época en la Fase 8.
+**Cambio respecto de la versión original de este plan.** La grilla proponía 27 filas con la regla *una sola cosa por fila*. Se recortó a 8 por dos razones medidas en la Fase 8: (a) el presupuesto real es de ~2 h para las 27, no de minutos, porque a esta escala cada step está dominado por el overhead de lanzamiento de kernels; y (b) una corrida preliminar mostró que las variantes de arquitectura caen todas dentro del desvío entre folds, es decir que la mayoría de esas filas iban a decir "indistinguible". El detalle de las alternativas evaluadas —OFAT recortado, recetas y factorial fraccionado— está en la sección 8 de [GUIA.md](GUIA.md).
 
-| Grupo | Variantes | Qué demuestra |
+**La regla pasa a ser explícita.** Las filas de las que salen conclusiones atribuibles cambian **una sola** clave. Dos filas mueven tres a la vez, a propósito: son *recetas* de capacidad, y la pregunta que responden no es cuál de las tres claves importa sino si mover la capacidad en bloque cambia algo. Para que la tabla siga siendo auditable, cada configuración **declara** qué claves toca (`CAMBIOS_DECLARADOS` en `src/ablations.py`, que arma el propio constructor) y un test verifica que la declaración coincida exactamente con el diff contra la base. Un segundo test exige que `solo_texto`, `solo_tabular` y `con_cart` sigan siendo de un solo cambio.
+
+| Configuración | Claves que cambia | Qué demuestra |
 |---|---|---|
-| Módulos | solo texto / solo tabular / texto + tabular | Cuánto aporta cada rama. Resultado esperado: la fusión gana |
-| **Sufijo** | con sufijo / sin sufijo en el input | El resultado esperado es un colapso a ROC ≈ 0.50. Es el hallazgo central del trabajo |
-| Campo de texto | solo `title` / solo `description` / ambos | Esperado: sin diferencia, porque son redundantes |
-| Positional encoding | sinusoidal / aprendido / **ninguno** | Con "ninguno" el modelo pierde el orden. Dado que la señal es un marcador presente sin importar la posición, es plausible que casi no cambie: sería un resultado interesante y honesto |
-| Pooling | `[CLS]` / mean pooling | |
-| Profundidad | `n_layers` ∈ {1, 2, 4} | |
-| Ancho | `d_model` ∈ {32, 64, 96} | Respeta el límite `< 100` del enunciado |
-| Cabezas | `n_heads` ∈ {1, 2, 4, 8} con `d_model` = 64 fijo | Aísla el efecto de la multi-cabeza del efecto de la capacidad |
-| Normalización | pre-LN / post-LN | |
-| Desbalance | sin peso / `pos_weight` / focal loss | |
-| Tabulares | con / sin `allergens`; con / sin `category` | Verifica el efecto medido en la sección 0.4 |
-| **Fuga** | con / sin `cart` | Convierte la trampa en un resultado presentable |
-| Vocabulario BPE | {1.000, 2.000, 4.000, 8.000} | Contenido de la Clase 2. Con embeddings desde cero, el tamaño del vocabulario controla directamente cuántos parámetros hay que aprender |
-| Atención cross-item | con / sin | Decisión A4. Resultado esperado: ganancia nula. Se reporta igual |
+| `base` | — | Referencia: texto + tabular, marcador, 2 capas, `d_model` 64, 4 cabezas, pre-LN, `[CLS]` |
+| **`sin_marcador`** | `keep_suffix`, `keep_reputation_sentence` | **El hallazgo central.** Apagar solo el sufijo no alcanza: el nivel está codificado también en la última oración de `description`. Con las dos apagadas se espera el colapso al nivel de lo tabular |
+| `solo_texto` | `use_tabular` | Cuánto aporta la rama tabular. Esperado: la fusión gana ~10 puntos de PR-AUC, que vienen de `allergens` y `category` dentro del nivel ALTO |
+| `solo_tabular` | `use_text` | El techo de ROC ≈ 0.58. Es lo que justifica que el módulo principal sea un encoder de texto |
+| `con_cart` | `include_cart` | La fuga, medida en lugar de argumentada. Convierte la trampa en un resultado presentable |
+| `arq_minima` | `n_layers`, `d_model`, `n_heads` | Receta: 1 capa, `d_model` 32, 1 cabeza. ¿Hace falta *algo* de esta capacidad para leer un marcador de 4 tokens? |
+| `arq_grande` | `n_layers`, `d_model`, `n_heads` | Receta: 4 capas, `d_model` 96 (máximo permitido), 8 cabezas. ¿Escalar ayuda o sobreajusta con 6.300 ejemplos? |
+| `vocab_256` | `vocab_size` | El tokenizador como hiperparámetro: el marcador pasa de 4 a 7.26 sub-tokens |
+
+**Qué queda fuera de la grilla y por qué se puede defender.** Pooling (`[CLS]` / mean), normalización (pre / post-LN), positional encoding (sinusoidal / aprendido / ninguno), manejo del desbalance (`pos_weight`, focal), campo de texto (título / descripción / ambos) y atención cross-item. Las seis están **implementadas y testeadas**: agregar cualquiera es una línea en `GRILLA`. Se dejan afuera porque su efecto esperado es del orden del desvío entre folds; la primera candidata a volver, si sobra presupuesto, es el positional encoding aprendido, que en la corrida preliminar fue el único con una caída visible (−0.065 de PR-AUC).
 
 No hay fila de transfer learning: la decisión A3 excluye los pesos pre-entrenados. Si en la defensa preguntan por la comparación, la respuesta es que fue una restricción de alcance asumida deliberadamente, y que el contenido de Clase 3 se cubre en el Ejercicio 3.
 
@@ -633,14 +633,16 @@ No hay fila de transfer learning: la decisión A3 excluye los pesos pre-entrenad
 
 **Criterio de aceptación.**
 - Cada fila tiene media y desvío sobre semillas y folds.
-- La ablación del sufijo está corrida y documentada.
+- La ablación del marcador está corrida y documentada.
+- Cada fila declara qué claves cambia y el test lo verifica contra la base.
 - Ninguna corrida usó el conjunto de test.
 - Ninguna corrida cargó pesos externos.
 
 **Errores a evitar.**
-- Cambiar dos cosas a la vez.
+- Cambiar dos cosas a la vez **sin declararlo**: mover varias claves es válido en una receta, siempre que la fila no se use después para atribuirle el efecto a una sola de ellas.
 - Comparar contra el test.
 - Descartar una variante por una sola corrida.
+- Reutilizar entre corridas datos preparados **y** la arquitectura. Es un bug real que ya ocurrió: el caché de folds devolvía también la `ModelConfig`, así que dos ablaciones de arquitectura entrenaban la misma red y producían filas idénticas. No falla nada; la tabla se llena de números plausibles y falsos.
 
 ---
 
