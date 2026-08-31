@@ -17,7 +17,7 @@ decisiones de diseño justificadas, está en [plan.md](plan.md).
 | 0 | Setup, semillas, estructura | hecho |
 | 1 | Carga y auditoría de fugas | hecho |
 | 2 | EDA formal (Ejercicio 1) | hecho |
-| 3 | Target y partición | pendiente |
+| 3 | Target y partición | hecho |
 | 4–12 | Features, baselines, tokenizer, Transformer, ablaciones | pendiente |
 
 ---
@@ -205,6 +205,49 @@ sentidos: no se puede separar el efecto "es pescado" del efecto "tiene alérgeno
 | `fig_06_bivariado_marginal.png` | Tasa marginal por categórica |
 | `fig_07_condicionado_alto.png` | `allergens` y `category` dentro del nivel ALTO |
 | `fig_08_temporal_vs_ruido.png` | Efecto horario contra la banda de ruido |
+
+---
+
+## Partición
+
+```bash
+python -m src.data.splits            # genera, guarda e informa
+python -m src.data.splits --check    # verifica lo que hay en disco
+```
+
+Toda la partición está **agrupada por `query_id`**: las filas de una misma búsqueda
+comparten filtros y contexto, así que van siempre juntas. Un split a nivel fila dejaría
+impresiones de la misma query en train y en test.
+
+| Partición | Filas | Queries | Prevalencia | Δ vs global |
+|---|---|---|---|---|
+| `dev` | 7.909 | 1.609 | 0.1292 | −0.09 pp |
+| `test` | 2.091 | 403 | **0.1334** | +0.33 pp |
+| ↳ `train` (dentro de dev) | 6.323 | 1.287 | 0.1298 | −0.03 pp |
+| ↳ `valid` (dentro de dev) | 1.586 | 322 | 0.1267 | −0.34 pp |
+| ↳ 5 folds de `GroupKFold` sobre dev | ~6.327 / ~1.582 | ~1.287 / ~322 | 0.1220 – 0.1403 | máx +1.02 pp |
+
+- **`test` se toca una sola vez**, en la Fase 10. Todas las decisiones — selección de
+  modelo y ablaciones — se toman contra la CV agrupada de 5 folds sobre `dev`. Esto protege
+  contra el *leakage del experimentador*: con 1.301 positivos totales, elegir contra un
+  único split de test es sobreajustarlo.
+- **`train` / `valid`** es un split fijo dentro de `dev`, para desarrollo rápido y early
+  stopping mientras se construye el modelo.
+- **No se estratifica** por `bought` a nivel fila: agrupando por query eso no tiene sentido.
+  Se verifica a posteriori que ninguna partición se desvíe más de **±1.5 pp** de la
+  prevalencia global. La desviación máxima es +1.02 pp (fold 3 valid).
+
+La prevalencia de `test` (0.1334) es el **piso del PR-AUC** y hay que reportarla al lado de
+cualquier PR-AUC.
+
+### Los splits no se versionan, pero están congelados
+
+Los `.npy` viven en `data/splits/`, que está gitignoreado. Lo que sí está versionado es
+`EXPECTED_FINGERPRINT` en [`src/data/splits.py`](src/data/splits.py): un hash de todos los
+índices, verificado por un test. Si una regeneración no lo reproduce —porque cambió el CSV,
+la semilla o la versión de scikit-learn— el test falla y los resultados ya reportados dejan
+de ser comparables. Ningún notebook ni script recalcula la partición: todos llaman a
+`load_splits()`.
 
 ---
 
