@@ -21,9 +21,18 @@ features:
   use_text: true
   use_tabular: true
   text_fields: [title, description]
-  keep_suffix: true     # ablacion central de la Fase 9
+  # Las dos codificaciones del nivel de reputacion. Van separadas porque son
+  # independientes entre si: la ablacion honesta de la Fase 9 apaga las dos.
+  keep_suffix: true                # marcador entre parentesis del titulo
+  keep_reputation_sentence: true   # ultima oracion de la descripcion
+  scaler: standard                 # standard | quantile
+  use_temporal: false              # ciclicas de timestamp: el EDA no les vio efecto
   numericas: [price, net_weight_oz, nutrition_score, filter_price_min, filter_price_max]
+  derivadas: [price_pos, price_per_oz, dim_largo, dim_ancho, dim_alto, dim_volumen]
   categoricas: [category, brand, storage_type, country_of_origin, unit_of_measure, package_size, allergens]
+  # Admitidas en la Fase 1 y descartadas en la Fase 4, con motivo en
+  # src/data/features.py::COLUMNAS_DESCARTADAS.
+  descartadas: [ingredients, timestamp]
 
 tokenizer:
   kind: bpe

@@ -18,7 +18,8 @@ decisiones de diseño justificadas, está en [plan.md](plan.md).
 | 1 | Carga y auditoría de fugas | hecho |
 | 2 | EDA formal (Ejercicio 1) | hecho |
 | 3 | Target y partición | hecho |
-| 4–12 | Features, baselines, tokenizer, Transformer, ablaciones | pendiente |
+| 4 | Features y preprocesamiento | hecho |
+| 5–12 | Baselines, tokenizer, Transformer, ablaciones | pendiente |
 
 ---
 
@@ -248,6 +249,81 @@ Los `.npy` viven en `data/splits/`, que está gitignoreado. Lo que sí está ver
 la semilla o la versión de scikit-learn— el test falla y los resultados ya reportados dejan
 de ser comparables. Ningún notebook ni script recalcula la partición: todos llaman a
 `load_splits()`.
+
+---
+
+## Features y preprocesamiento
+
+```bash
+python -m src.data.features    # informa qué construye, qué descarta y por qué
+```
+
+Todo el preprocesamiento vive en un objeto,
+[`FeaturePipeline`](src/data/features.py), que **se ajusta una sola vez y solo con
+train**:
+
+```python
+pipe = FeaturePipeline().fit(df.iloc[splits.train])   # escalador y vocabularios
+Xtr, Xva = pipe.transform(df.iloc[splits.train]), pipe.transform(df.iloc[splits.valid])
+```
+
+Ajustar el escalador con el dataset completo hace que la media del test participe en la
+normalización de train. Es la fuga más frecuente, así que acá es imposible por
+construcción: `fit` **falla si se lo llama dos veces** sobre el mismo objeto. Para la CV se
+construye un pipeline nuevo por fold, que además es lo único correcto.
+
+Del mismo ajuste salen las cuatro representaciones que usan las fases siguientes:
+
+| Salida | Forma (train) | Para qué |
+|---|---|---|
+| `num` | 6.323 × 11 | numéricas escaladas — baselines y rama tabular |
+| `onehot` | 6.323 × 87 | categóricas en one-hot — baselines lineales y GBDT |
+| `cat` | 6.323 × 7 | códigos enteros — `nn.Embedding` (Fase 8) |
+| `text_a` / `text_b` | 6.323 | título y descripción — tokenizador (Fase 6) |
+
+**Numéricas (11).** Las 5 del CSV más `price_pos`, `price_per_oz` y las cuatro
+dimensiones parseadas de `dimensions_in` (largo, ancho, alto, volumen). `price_pos` es la
+única feature de contexto de filtro que no es constante: que el precio caiga dentro del
+rango se cumple en el 100% de las filas, pero *dónde* cae correlaciona 0.105 con la compra
+dentro del nivel ALTO.
+
+**Categóricas (7 → 87 columnas one-hot).** Cardinalidad de 3 a 27, así que no hace falta
+bucket `[RARE]`. El código 0 de cada columna queda reservado para `[UNK]`: un valor que
+aparezca solo en valid o test no rompe el `transform`. El one-hot se deriva de los mismos
+códigos que consume `nn.Embedding`, así que las dos ramas no pueden desincronizarse.
+
+`allergens` nulo (44.55%) se codifica como categoría propia `NONE`, **no se imputa**: su
+tasa de compra es 0.1385, entre Soy (0.134) y Milk (0.146); imputarlo con la moda lo
+mezclaría con Wheat (0.155).
+
+**Descartadas, con motivo escrito** (`COLUMNAS_DESCARTADAS`, verificado por un test contra
+`FEATURES_ADMITIDAS`):
+
+| Columna | Motivo |
+|---|---|
+| `ingredients` | **Redundante con `category`.** Normalizando cada lista a su conjunto ordenado quedan **12 conjuntos para 12 categorías, en correspondencia biunívoca** (Produce ↔ {Whole produce}, Seafood ↔ {Salt, Seafood}, …). Las 190 combinaciones crudas son permutaciones del mismo conjunto: Bakery sola tiene 120. |
+| `timestamp` | Sin efecto medible (`fig_08`). Las cíclicas seno/coseno están implementadas y se activan con `use_temporal=True`, para que el descarte sea reversible. |
+
+### La ablación del marcador de reputación tiene dos interruptores
+
+El nivel está codificado **dos veces y de forma independiente**: en el sufijo del título y
+en la última oración de la descripción. Por eso son dos banderas separadas
+(`keep_suffix`, `keep_reputation_sentence`) y la ablación honesta de "sin marcador" apaga
+las dos: borrar solo el sufijo no borra la señal.
+
+`strip_reputation_sentence` saca la última oración **solo cuando es de reputación**. 459 de
+las 10.000 descripciones no la tienen (todas de nivel CERO) y terminan en la oración
+estructural `Listed under … storage.`; borrárselas las dejaría sistemáticamente más cortas
+que al resto y esa diferencia se confundiría con el efecto que la ablación quiere medir.
+
+### Dataset y DataLoader
+
+[`src/data/dataset.py`](src/data/dataset.py). La tokenización se precomputa una sola vez
+como tensores y `__getitem__` solo indexa. El batch se mueve a `DEVICE` en **un único
+lugar**, el `collate_fn` que arma `make_dataloader`, que además recibe `generator` y
+`worker_init_fn` para que el orden de los batches sea reproducible. La rama de texto es
+opcional (`input_ids=None`): las ablaciones "solo texto" y "solo tabular" se expresan
+construyendo el dataset sin una de las dos partes, no con banderas dentro del modelo.
 
 ---
 
