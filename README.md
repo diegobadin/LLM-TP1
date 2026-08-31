@@ -16,7 +16,7 @@ decisiones de diseño justificadas, está en [plan.md](plan.md).
 |---|---|---|
 | 0 | Setup, semillas, estructura | hecho |
 | 1 | Carga y auditoría de fugas | hecho |
-| 2 | EDA formal (Ejercicio 1) | pendiente |
+| 2 | EDA formal (Ejercicio 1) | hecho |
 | 3 | Target y partición | pendiente |
 | 4–12 | Features, baselines, tokenizer, Transformer, ablaciones | pendiente |
 
@@ -129,6 +129,82 @@ OK: 20 steps identicos bit a bit en dos corridas.
 
 El mismo *fingerprint* se obtuvo en corridas separadas del proceso y con
 `--num-workers 2`.
+
+---
+
+## EDA — Ejercicio 1
+
+[`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb). Se versiona **sin outputs**, para que
+los diffs sean legibles; corre de punta a punta sin errores y escribe sus figuras en
+[`report/figures/`](report/figures/), que sí están versionadas.
+
+```bash
+cd notebooks && jupyter nbconvert --to notebook --execute --inplace 01_eda.ipynb
+# o, interactivo:
+jupyter lab notebooks/01_eda.ipynb
+```
+
+El notebook incluye un `assert` que falla si alguno de los hechos declarados en el plan
+deja de reproducirse sobre el CSV.
+
+### Hallazgos que condicionan el diseño
+
+**La señal está en un marcador de reputación insertado en el título.** Los 20 sufijos
+(`(Best Seller)`, `(Clearance Listing)`, …, incluido *sin sufijo*) se separan en tres
+niveles sin solapamiento:
+
+| Nivel | Sufijos | Filas | Tasa de compra | % de las compras |
+|---|---|---|---|---|
+| ALTO | `#1 Pick`, `Best Seller`, `Customer Favorite`, `Top Rated` | 1.931 | **0.6468** | 96.0% |
+| MEDIO | `Highly Rated`, `Popular Choice`, `Shopper Favorite`, `Well Reviewed` | 1.973 | 0.0264 | 4.0% |
+| CERO | los 12 restantes | 6.096 | **0.0000** | 0.0% |
+
+Por eso el módulo Transformer tiene que ser un **encoder de texto**: una arquitectura
+tabular pura no puede ver el marcador y tiene techo en ROC ≈ 0.58.
+
+**La última oración de `description` codifica el mismo nivel.** Las 36 oraciones finales
+particionan limpiamente en los tres niveles: ninguna aparece en más de uno. El sufijo y la
+oración final son **dos codificaciones independientes del mismo nivel latente** — cada
+sufijo se reparte entre las 4 oraciones de su nivel a ~27% cada una, no hay
+correspondencia uno a uno. Predice que la ablación *solo título / solo descripción / ambos*
+no va a mostrar diferencia.
+
+**El texto es plantillado.** `title` contiene `brand` en el 100% de las filas;
+`description` contiene `package_size` y `category` en el 100%. Lo único que el texto aporta
+y las columnas tabulares no es el marcador de reputación.
+
+**El análisis marginal esconde los efectos reales.** Condicionando al nivel ALTO
+(tasa base 0.647), `allergens` va de Fish 0.291 a Milk 0.721 y `category` de Seafood 0.302
+a Bakery 0.742. `price_pos` pasa de r = 0.039 marginal a 0.105 dentro del nivel. Ahí está
+el margen de la fusión texto + tabular.
+
+**No hay split temporal.** El dataset cubre 730 días, pero el rango temporal *dentro de una
+misma query* tiene mediana de **488 días**. El `timestamp` no ordena las queries. Ver
+`fig_03_coherencia_temporal.png`.
+
+**No hay efecto temporal.** La variación de la tasa por hora, día de semana y mes dentro
+del nivel ALTO está en el orden del ruido de muestreo (razón observado/azar ≈ 1). Las
+features cíclicas de `timestamp` se descartan.
+
+**Las impresiones de una query no compiten entre sí.** La tasa de un ítem ALTO es la misma
+haya 1, 2, 3 o 4 ítems ALTO en la query (0.643 / 0.645 / 0.669 / 0.630). Anticipa que la
+atención *cross-item* va a dar ganancia nula.
+
+**Seafood y Fish/Shellfish son la misma señal.** Correspondencia perfecta en ambos
+sentidos: no se puede separar el efecto "es pescado" del efecto "tiene alérgeno marino".
+
+### Figuras
+
+| Archivo | Qué muestra |
+|---|---|
+| `fig_01_numericas.png` | Distribución y asimetría de las 5 numéricas |
+| `fig_02_estructura_queries.png` | Ítems por query y compras por query |
+| `fig_03_coherencia_temporal.png` | **Justifica descartar el split temporal (D4)** |
+| `fig_04_tasa_por_sufijo.png` | **Tasa de compra por sufijo — el hallazgo central** |
+| `fig_05_longitud_texto.png` | Longitud del texto, para dimensionar `max_len` |
+| `fig_06_bivariado_marginal.png` | Tasa marginal por categórica |
+| `fig_07_condicionado_alto.png` | `allergens` y `category` dentro del nivel ALTO |
+| `fig_08_temporal_vs_ruido.png` | Efecto horario contra la banda de ruido |
 
 ---
 
