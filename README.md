@@ -21,7 +21,8 @@ decisiones de diseño justificadas, está en [plan.md](plan.md).
 | 4 | Features y preprocesamiento | hecho |
 | 5 | Baselines | hecho |
 | 6 | Tokenizador BPE | hecho |
-| 7–12 | Transformer, entrenamiento, ablaciones, presentación | pendiente |
+| 7 | Transformer desde cero (bloques + tests) | hecho |
+| 8–12 | Modelo completo, entrenamiento, ablaciones, presentación | pendiente |
 
 ---
 
@@ -442,6 +443,82 @@ El tokenizador serializado va a `data/tokenizer/` (gitignoreado, regenerable con
 Lo versionado es `EXPECTED_FINGERPRINT`, un hash del vocabulario y los merges, verificado
 por un test. Para la CV **se reentrena por fold**: cuesta menos de un segundo, así que no
 hace falta ni siquiera aceptar el sesgo de entrenarlo una vez sobre `dev`.
+
+---
+
+## El Transformer, desde cero
+
+[`src/model/`](src/model/): `attention.py`, `encoder.py`, `heads.py`, `init.py`.
+
+### Qué se toma de la librería y qué se escribe a mano
+
+| De PyTorch, sin discusión | Escrito a mano |
+|---|---|
+| `nn.Linear`, `nn.Embedding`, `nn.LayerNorm`, `nn.Dropout` | Scaled dot-product attention |
+| `nn.GELU`, `F.softmax` | Multi-head attention (split, atención por cabeza, concat, `W_O`) |
+| `torch.optim.AdamW`, `DataLoader` | Bloque encoder (residuales + pre-LN + FFN) |
+| `nn.MultiheadAttention` **solo como oráculo en tests** | Positional encoding (sinusoidal y aprendido) |
+| | Construcción y aplicación de la máscara de padding |
+| | Pooling (`[CLS]` y mean enmascarado) |
+
+**No se usa `nn.TransformerEncoderLayer`.** Encapsula pre-LN, dropout, residuales y FFN en
+una sola llamada — que es justamente lo que el enunciado pide construir — y además bloquea
+el acceso a los pesos de atención que necesita la Fase 10.
+
+### Tres implementaciones de la atención, los mismos pesos
+
+`MultiHeadSelfAttention(attn_impl=...)`:
+
+| Valor | Uso |
+|---|---|
+| `"scratch"` | **Default.** Es el modelo que se reporta y del que salen los mapas de atención (`encoder.attention_maps()`, uno por capa, `(batch, heads, seq, seq)`) |
+| `"torch_sdpa"` | `F.scaled_dot_product_attention`, camino rápido, sin pesos observables |
+| `"torch_mha"` | `nn.MultiheadAttention`, solo para el test de equivalencia |
+
+Los tres comparten el mismo `state_dict`, así que se cargan entre sí y se comparan. Eso
+convierte a la librería en un **verificador** de la implementación propia en lugar de un
+reemplazo.
+
+### Los tests
+
+```bash
+pytest tests/test_attention.py tests/test_heads.py    # 40 tests
+```
+
+| Test | Qué verifica |
+|---|---|
+| **Equivalencia con `nn.MultiheadAttention`**, con y sin máscara (`atol=1e-5`) | Correctitud numérica de la implementación propia |
+| Forma de salida = forma de entrada en el bloque | Errores de reshape |
+| Los pesos suman 1 sobre la última dimensión | Softmax en el eje correcto |
+| Con máscara, el peso hacia `[PAD]` es exactamente 0 | Máscara sumada **antes** del softmax |
+| Cambiar un token `[PAD]` no cambia las posiciones válidas | Máscara efectiva de punta a punta |
+| Permutar dos tokens **sin** PE no cambia el mean pooling | Invariancia a permutación de la atención |
+| **Con** PE (sinusoidal y aprendido) la permutación sí cambia | El PE está conectado |
+| `d_model % n_heads != 0` levanta excepción explícita | Error de configuración detectado temprano |
+| Batch de 1 y batch de 8 dan lo mismo para el mismo ejemplo | Sin filtración entre elementos del batch |
+| `scratch` y `torch_sdpa` coinciden con los mismos pesos | Consistencia entre modos |
+| Forward y backward sin NaN en GPU, pre-LN y post-LN | Criterio de aceptación de la fase |
+| Una fila enteramente enmascarada no produce NaN | Se usa `-1e9`, no `-inf` |
+
+Los dos tests de permutación tienen además valor expositivo: son la demostración empírica
+de por qué el positional encoding hace falta, y se pueden mostrar en la presentación.
+
+### Detalles que no se ven pero importan
+
+- Se divide por `√d_head`, no por `√d_model`: el producto punto ocurre dentro de cada
+  cabeza. Dividir por la dimensión equivocada no rompe nada visible, solo cambia la
+  temperatura del softmax y degrada el entrenamiento en silencio.
+- La máscara suma **`-1e9`, no `-inf`**: con `-inf`, una fila enteramente enmascarada
+  produce `NaN` en el softmax y el `NaN` se propaga por los gradientes a todo el batch.
+- Convención de máscara del proyecto: **`True` = token real**. `nn.MultiheadAttention` usa
+  la inversa, y esa conversión vive en un único lugar (`to_torch_mha`).
+- Embeddings + PE pasan por un `LayerNorm`. Los embeddings nacen en `N(0, 0.02)` y la
+  codificación sinusoidal tiene amplitud 1: sin normalizar, la variante sinusoidal
+  arrancaría dominada por la posición y la ablación mediría escalas, no encodings.
+- Inicialización (crítica porque no hay pesos pre-entrenados): embeddings `N(0, 0.02)` con
+  la fila de `[PAD]` en cero y sin gradiente, lineales con Xavier uniforme, bias en cero, y
+  el bias de salida en **`log(0.13/0.87) = −1.90`**, así el modelo arranca prediciendo la
+  tasa base.
 
 ---
 
